@@ -1,4 +1,4 @@
-﻿**### PULP-Based QR Decomposition Algorithms**
+﻿### PULP-Based QR Decomposition Algorithms
 
 This repository contains three implementations of the PULP-based QR decomposition algorithm: Given Rotation, Gram Schmidt, and Householder. The QR decomposition is a widely used linear algebra technique that can be used to solve a variety of problems, including least squares optimization, eigenvalue computation, and more.Each algorithm has been implemented in C and optimized for PULP-based architectures.
 
