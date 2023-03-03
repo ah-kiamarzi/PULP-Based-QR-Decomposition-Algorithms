@@ -22,13 +22,13 @@ This will generate an executable file. Where UC is a binary value, and CORES is 
 
 ## Performance
 
-The performance of each algorithm was evaluated using GVSoC platform. The results are shown below:
+The performance of each algorithm was evaluated using the performance counters of GVSoC platform. The results are shown below:
 
-	| Algorithm | Matrix Size | Execution Time (ms) |
-	| -------- | -------- | -------- |
-	| Given Rotation | 0 | 0 |
-	| Gram Schmidt | 0 | 0 |
-	| Householder | 0 | 0 |
+| Algorithm | Matrix Size | Execution Time (ms) |
+| -------- | -------- | -------- |
+| Given Rotation | 0 | 0 |
+| Gram Schmidt | 0 | 0 |
+| Householder | 0 | 0 |
 
 
 
