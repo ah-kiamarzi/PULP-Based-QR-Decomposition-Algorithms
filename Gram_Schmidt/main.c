@@ -23,18 +23,6 @@ PI_L1 float rk=0.0;
 PI_L1 static float temp[NUM_CORES];
 PI_L1 static float one = 1.0;
 
-unsigned long cycles = 0;
-unsigned long instr = 0;
-unsigned long active = 0;
-unsigned long ldext = 0;
-unsigned long tcdmcont = 0;
-unsigned long ldstall = 0;
-unsigned long imiss = 0;
-unsigned long apu_cont = 0;
-unsigned long apu_dep = 0;
-unsigned long apu_type = 0;
-unsigned long apu_wb = 0;
-
 void cluster_main();
 void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input[][N_CHANNELS]);
 
@@ -74,6 +62,18 @@ int main(){
 
 
 void cluster_main(){
+
+	unsigned long cycles = 0;
+	unsigned long instr = 0;
+	unsigned long active = 0;
+	unsigned long ldext = 0;
+	unsigned long tcdmcont = 0;
+	unsigned long ldstall = 0;
+	unsigned long imiss = 0;
+	unsigned long apu_cont = 0;
+	unsigned long apu_dep = 0;
+	unsigned long apu_type = 0;
+	unsigned long apu_wb = 0;
 
 	pi_perf_conf(
 	(1<<PI_PERF_CYCLES) | 

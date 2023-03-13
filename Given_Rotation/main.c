@@ -80,6 +80,18 @@ int main(){
 
 void cluster_main(){    
 
+    unsigned long cycles = 0;
+    unsigned long instr = 0;
+    unsigned long active = 0;
+    unsigned long ldext = 0;
+    unsigned long tcdmcont = 0;
+    unsigned long ldstall = 0;
+    unsigned long imiss = 0;
+    unsigned long apu_cont = 0;
+    unsigned long apu_dep = 0;
+    unsigned long apu_type = 0;
+    unsigned long apu_wb = 0;
+	
     pi_perf_conf(
     (1<<PI_PERF_CYCLES) | 
     (1<<PI_PERF_INSTR)  | 
