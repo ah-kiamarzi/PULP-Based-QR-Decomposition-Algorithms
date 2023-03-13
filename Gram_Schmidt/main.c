@@ -229,32 +229,39 @@ void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input
 	int j;
 
 	#if NUM_CORES > 1
-	int blockSize_NC = N_CHANNELS/NUM_CORES;
-	int start_NC = pi_core_id()*blockSize_NC;
-	if(pi_core_id()==(NUM_CORES - 1)){
-		blockSize_NC = N_CHANNELS - (NUM_CORES - 1)* blockSize_NC;}
+	int core_id = pi_core_id();
+	int blockSize_NC = (N_CHANNELS + NUM_CORES - 1) / NUM_CORES;
+	int start_NC = core_id * blockSize_NC;
+	if(core_id == (NUM_CORES-1)){
+		blockSize_NC = N_CHANNELS - (NUM_CORES-1) * blockSize_NC;
+	}
+	int end_NC = start_NC + (blockSize_NC & 0xfffffffe);
 	#endif
 
 	for(int k=0; k<EV_WINDOWS_SIZE; k++){
 		#if NUM_CORES > 1
-		for(j = start_NC; ((j+1)<start_NC + blockSize_NC); j+=2){
-			float in0 = input[k][j];float in1 = input[k][j+1];
-			Q[k][j] = in0;
-			Q[k][j+1] = in1;
+		float *restrict  in = (float *) (&input[k][start_NC]);
+		float *restrict out = (float *) (&Q[k][start_NC]);
+		for(j = start_NC; j < end_NC; j+=2){
+			float in0 = *(in++);
+			float in1 = *(in++);
+			*(out++) = in0;
+			*(out++) = in1;
 		}
-		if(j<start_NC + blockSize_NC){
-			float in0 = input[k][j];
-			Q[k][j] = in0;
+		if(blockSize_NC & 0x1){
+			float in0 = input[k][end_NC];
+			Q[k][end_NC] = in0;
 		}
 		#else
-		for(j=0; (j+1)<N_CHANNELS; j+=2){
-			float in0 = input[k][j];float in1 = input[k][j+1];
+		for(j=0; j<(N_CHANNELS & 0xfffffffe); j+=2){
+			float in0 = input[k][j];
+			float in1 = input[k][j+1];
 			Q[k][j] = in0;
 			Q[k][j+1] = in1;
 		}
-		if(j<N_CHANNELS){
-			float in0 = input[k][j];
-			Q[k][j] = in0;
+		if(N_CHANNELS & 0x1){
+			float in0 = input[k][N_CHANNELS - 1];
+			Q[k][N_CHANNELS - 1] = in0;
 		}
 		#endif		
 
@@ -265,68 +272,88 @@ void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input
 		for(int i=0; i<k; i++){
 			#if NUM_CORES > 1
 			temp[pi_core_id()]=0;
-			for(j = start_NC; ((j+1)<start_NC + blockSize_NC); j+=2){
-				float ji0 = Q[i][j];float jk0 = Q[k][j];
-				float ji1 = Q[i][j+1];float jk1 = Q[k][j+1];
-				temp[pi_core_id()] = temp[pi_core_id()] + (ji0 * jk0) + (ji1 * jk1);				
+			for(j = start_NC; j < end_NC; j+=2){
+				float ji0 = Q[i][j];
+				float jk0 = Q[k][j];
+				float ji1 = Q[i][j+1];
+				float jk1 = Q[k][j+1];
+				temp[core_id] = temp[core_id] + (ji0 * jk0) + (ji1 * jk1);				
 			}
-			if((j<start_NC + blockSize_NC)){
-				float ji0 = Q[i][j];float jk0 = Q[k][j];
-				temp[pi_core_id()] = temp[pi_core_id()] + (ji0 * jk0);
+			if(blockSize_NC & 0x1){
+				float ji0 = Q[i][end_NC];
+				float jk0 = Q[k][end_NC];
+				temp[core_id] = temp[core_id] + (ji0 * jk0);
 			}
 			
 			pi_cl_team_barrier();
 
-			if(pi_core_id()==0)
-				for(j=0; j<NUM_CORES; j++){
-			    		R[i][k]+=temp[j];
-			    	}
+			if(core_id == 0) {
+				float temp0 = temp[0];
+				float temp1 = temp[1];
+        			for(int c=2; c<NUM_CORES; c+=2){
+					float val0 = temp[c];
+					float val1 = temp[c+1];
+					hal_compiler_barrier();
+					temp0 += val0;
+					temp1 += val1;
+				}
+				R[i][k] = temp0 + temp1;
+			}			
 			pi_cl_team_barrier();
 
 			#else
 
-			for(j=0; (j+1)<N_CHANNELS; j+=2){
-				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
-				float Qji1 = Q[i][j+1];float Qjk1 = Q[k][j+1];
+			for(j=0; j<(N_CHANNELS & 0xfffffffe); j+=2){
+				float Qji0 = Q[i][j];
+				float Qjk0 = Q[k][j];
+				float Qji1 = Q[i][j+1];
+				float Qjk1 = Q[k][j+1];
 				float Rik  = R[i][k];
 				R[i][k] = Rik + (Qji0 * Qjk0) + (Qji1 * Qjk1);
-            }
-            if(j<N_CHANNELS){				
-				float Qji0 = Q[i][j]; float Qjk0 = Q[k][j];
+			}
+			if(N_CHANNELS & 0x1){				
+				float Qji0 = Q[i][j];
+				float Qjk0 = Q[k][j];
 				float Rik  = R[i][k];
 				float temp = (Qji0 * Qjk0);
 				R[i][k] = Rik + temp;                	
-            }
+			}
 			#endif
 			
 			#if NUM_CORES > 1
-			for(j = start_NC; (j+1<start_NC + blockSize_NC); j+=2){
+			for(j = start_NC; j<end_NC; j+=2){
 				float Rik = R[i][k];
-				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
-				float Qji1 = Q[i][j+1];float Qjk1 = Q[k][j+1];
+				float Qji0 = Q[i][j];
+				float Qjk0 = Q[k][j];
+				float Qji1 = Q[i][j+1];
+				float Qjk1 = Q[k][j+1];
 				
 				//hal_compiler_barrier();
                 		
 				Q[k][j] = Qjk0 - Rik*Qji0;
-                Q[k][j+1] = Qjk1 - Rik*Qji1;
-            }
-			if(j<start_NC + blockSize_NC){
+				Q[k][j+1] = Qjk1 - Rik*Qji1;
+			}
+			if(blockSize_NC & 0x1){
 				float Rik = R[i][k];
-				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
-				Q[k][j] = Qjk0 - Rik*Qji0;
+				float Qji0 = Q[i][end_NC];
+				float Qjk0 = Q[k][end_NC];
+				Q[k][end_NC] = Qjk0 - Rik*Qji0;
 			}
 			#else
-			for(j=0; j+1<N_CHANNELS; j+=2){
+			for(j=0; j<(N_CHANNELS & 0xfffffffe); j+=2){
 				float Rik = R[i][k];
-				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
-				float Qji1 = Q[i][j+1];float Qjk1 = Q[k][j+1];
+				float Qji0 = Q[i][j];
+				float Qjk0 = Q[k][j];
+				float Qji1 = Q[i][j+1];
+				float Qjk1 = Q[k][j+1];
 
 				Q[k][j] = Qjk0 - Rik*Qji0;
 				Q[k][j+1] = Qjk1 - Rik*Qji1;
 			}
-			if(j<N_CHANNELS){
+			if(N_CHANNELS & 0x1){
 				float Rik = R[i][k];
-				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
+				float Qji0 = Q[i][j];
+				float Qjk0 = Q[k][j];
 				Q[k][j] = Qjk0 - Rik*Qji0;
 			}
 			#endif
@@ -343,29 +370,32 @@ void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input
 		rk = one/R[k][k];
 		
 		#if NUM_CORES > 1
-		for( j = start_NC; (j+1)<start_NC + (blockSize_NC & 0xFFFE); j+=2){
-			float Qjk0 = Q[k][j];float Qjk1 = Q[k][j+1];
+		for( j = start_NC; j < end_NC; j+=2){
+			float Qjk0 = Q[k][j];
+			float Qjk1 = Q[k][j+1];
 			Q[k][j] = Qjk0 * rk;
 			Q[k][j+1] = Qjk1 * rk;
 			
-		} if (j<start_NC + (blockSize_NC & 0xFFFE)){
-			float Qjk0 = Q[j][k];
-			Q[k][j] = Qjk0 * rk;
+		}
+		
+		if (blockSize_NC & 0x1){
+			float Qjk0 = Q[k][end_NC];
+			Q[k][end_NC] = Qjk0 * rk;
 		}
 		#else
-		for( j=0; (j+1)<N_CHANNELS; j+=2){
-			float Qjk0 = Q[k][j];float Qjk1 = Q[k][j+1];
+		for( j=0; j<(N_CHANNELS & 0xfffffffe); j+=2){
+			float Qjk0 = Q[k][j];
+			float Qjk1 = Q[k][j+1];
 			Q[k][j] = Qjk0 * rk;
 			Q[k][j+1] = Qjk1 * rk;
-		} if (j<N_CHANNELS){
+		}
+		if (N_CHANNELS & 0x1){
 			float Qjk0 = Q[k][j];
 			Q[k][j] = Qjk0 * rk;
 		}
 		#endif
 		
 		#if NUM_CORES > 1 
-		if(blockSize_NC & 0x0001){
-			Q[k][j] = Q[k][j]*rk;}
 		pi_cl_team_barrier();
 		#endif
 		
