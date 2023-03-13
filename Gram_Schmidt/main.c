@@ -16,9 +16,7 @@ PI_L1 float Q[N_CHANNELS][N_CHANNELS];
 PI_L1 float R[N_CHANNELS][EV_WINDOWS_SIZE];
 
 PI_L1 float n;
-PI_L1 int i2;
 PI_L1 static float buffer[NUM_CORES];
-PI_L1 static int idx[NUM_CORES];
 PI_L1 float rk=0.0;
 PI_L1 static float temp[NUM_CORES];
 PI_L1 static float one = 1.0;
@@ -141,7 +139,7 @@ void cluster_main(){
     
 	pi_cl_team_barrier();
     
-	/*if(pi_core_id()==0){
+	if(pi_core_id()==0){
 	printf("\n\nQ = \n");
 		for(int i=0; i<N_CHANNELS; i++){
 			for(int j=0; j<N_CHANNELS; j++)
@@ -155,7 +153,7 @@ void cluster_main(){
 				printf("%f ", R[i][j]);
 			printf("\n");
 		}
-	}*/
+	}
 
 	pi_cl_team_barrier();
 }
@@ -167,53 +165,62 @@ inline float Sqrt(float x) {
 }
 
 float norm(float *v, int row, int column){ 
-	i2=0;
 	n = 0.0f;
 	int j;
-	#if NUM_CORES > 1
+	int idx;
+	float res;
 
-	int blockSize_column = column/NUM_CORES;
-	int start_column = pi_core_id()*blockSize_column;
-	int start_matrice = pi_core_id()*blockSize_column;
-
-	if(pi_core_id()==(NUM_CORES - 1)){
-		blockSize_column = column - (NUM_CORES - 1)* blockSize_column;
+#if NUM_CORES > 1
+	int core_id = pi_core_id();
+	int blockSize_column = (column + NUM_CORES - 1) / NUM_CORES;
+	int start_column = core_id * blockSize_column;
+	int end_column = start_column + blockSize_column;
+	if(end_column > column){
+		end_column = column;
 	}
 	
-	buffer[pi_core_id()]=0;
-	idx[pi_core_id()]=0;
-	
-	for(j = start_column; (j<column) && (j<start_column + blockSize_column); j++){
-		buffer[pi_core_id()] = buffer[pi_core_id()] + v[idx[pi_core_id()]+start_matrice]*v[idx[pi_core_id()]+start_matrice];
-		idx[pi_core_id()]+=1;
+	idx = 0;
+	res = 0.0f;
+	for(j = start_column; j < end_column; j++){
+		res = res +  v[idx+start_column] * v[idx+start_column];
+		idx++;
 	}
+	buffer[core_id] = res;
 		
 	pi_cl_team_barrier();
 			
-	if(pi_core_id()==0)
-		for(j=0; j<NUM_CORES; j++){
-			n += buffer[j];
+	if(core_id == 0){
+		n = 0.0;
+		float temp0 = buffer[0];
+		float temp1 = buffer[1];
+		for(int c=2; c<NUM_CORES; c+=2){
+			float val0 = buffer[c];
+			float val1 = buffer[c+1];
+			hal_compiler_barrier();
+			temp0 += val0;
+			temp1 += val1;
 		}
-	pi_cl_team_barrier();
-	#else
+        	n = temp0 + temp1;
+	}
 
-	for(j=0; (j+1)<column; j+=2){
-		float t0 = v[i2];float t1 = v[i2+1];
-		float temp = t0*t0;
-		temp = temp + t1*t1;
-		n = n + temp;
-		i2+=2*1;
+	pi_cl_team_barrier();
+#else
+	idx = 0;
+	for(j=0; j<column/2; j++){
+		float t0 = v[idx];
+		float t1 = v[idx+1];
+		n += t0*t0;
+		n += t1*t1;
+		idx += 2;
 	}
 		
-	if(j<column){
-		float t0 = v[i2];
-		float temp = t0*t0;
-		n = n + temp;
-		i2+=1*1;
+	if(column & 0x0001){
+		float t0 = v[row-1];
+		n = n + t0 * t0;
 	}
 
-	#endif
-	return sqrt(n);
+#endif
+	return Sqrt(n);
 	
 }
 
