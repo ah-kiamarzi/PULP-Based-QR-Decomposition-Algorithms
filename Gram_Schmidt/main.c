@@ -17,8 +17,7 @@ PI_L1 float R[N_CHANNELS][EV_WINDOWS_SIZE];
 
 PI_L1 float n;
 PI_L1 static float buffer[NUM_CORES];
-PI_L1 float rk=0.0;
-PI_L1 static float temp[NUM_CORES];
+PI_L1 float rk = 0.0;
 PI_L1 static float one = 1.0;
 
 void cluster_main();
@@ -106,7 +105,7 @@ void cluster_main(){
 	pi_perf_reset();
 	pi_perf_start();
     
-    qr_gramSmidt(Q, R, input);
+	qr_gramSmidt(Q, R, input);
 
 	pi_perf_stop();
 	
@@ -274,28 +273,29 @@ void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input
 
 		for(int i=0; i<k; i++){
 			#if NUM_CORES > 1
-			temp[pi_core_id()]=0;
+			res = 0;
 			for(j = start_NC; j < end_NC; j+=2){
 				float ji0 = Q[i][j];
 				float jk0 = Q[k][j];
 				float ji1 = Q[i][j+1];
 				float jk1 = Q[k][j+1];
-				temp[core_id] = temp[core_id] + (ji0 * jk0) + (ji1 * jk1);				
+				res = res + (ji0 * jk0) + (ji1 * jk1);				
 			}
 			if(blockSize_NC & 0x1){
 				float ji0 = Q[i][end_NC];
 				float jk0 = Q[k][end_NC];
-				temp[core_id] = temp[core_id] + (ji0 * jk0);
+				res = res + (ji0 * jk0);
 			}
+			buffer[core_id] = res;
 			
 			pi_cl_team_barrier();
 
 			if(core_id == 0) {
-				float temp0 = temp[0];
-				float temp1 = temp[1];
+				float temp0 = buffer[0];
+				float temp1 = buffer[1];
         			for(int c=2; c<NUM_CORES; c+=2){
-					float val0 = temp[c];
-					float val1 = temp[c+1];
+					float val0 = buffer[c];
+					float val1 = buffer[c+1];
 					hal_compiler_barrier();
 					temp0 += val0;
 					temp1 += val1;
@@ -305,22 +305,20 @@ void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input
 			pi_cl_team_barrier();
 
 			#else
-
+			res = R[i][k];;
 			for(j=0; j<(N_CHANNELS & 0xfffffffe); j+=2){
 				float Qji0 = Q[i][j];
 				float Qjk0 = Q[k][j];
 				float Qji1 = Q[i][j+1];
 				float Qjk1 = Q[k][j+1];
-				float Rik  = R[i][k];
-				R[i][k] = Rik + (Qji0 * Qjk0) + (Qji1 * Qjk1);
+				res = res + (Qji0 * Qjk0) + (Qji1 * Qjk1);
 			}
 			if(N_CHANNELS & 0x1){				
 				float Qji0 = Q[i][j];
 				float Qjk0 = Q[k][j];
-				float Rik  = R[i][k];
-				float temp = (Qji0 * Qjk0);
-				R[i][k] = Rik + temp;                	
+				res = res + (Qji0 * Qjk0);
 			}
+			R[i][k] = res;
 			#endif
 			
 			#if NUM_CORES > 1
