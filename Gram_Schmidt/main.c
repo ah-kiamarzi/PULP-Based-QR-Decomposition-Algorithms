@@ -5,12 +5,12 @@
 #include <math.h>
 
 #define STATS 
-#define STACK_SIZE 2048
+#define STACK_SIZE 1024
 #define MOUNT 1
 #define UNMOUNT 0
 #define CID 0
 
-
+//#define DEBUG
 
 PI_L1 float Q[N_CHANNELS][N_CHANNELS]; 
 PI_L1 float R[N_CHANNELS][EV_WINDOWS_SIZE];
@@ -41,7 +41,11 @@ static int test_entry(){
 		return -1;
 	}
 
-	pi_cluster_send_task_to_cl(&cluster_dev, pi_cluster_task(&cl_task, cluster_entry, NULL));
+	pi_cluster_task(&cl_task, cluster_entry, NULL);
+	cl_task.stack_size = STACK_SIZE;
+	cl_task.slave_stack_size = STACK_SIZE;
+
+	pi_cluster_send_task_to_cl(&cluster_dev, &cl_task);
 
 	pi_cluster_close(&cluster_dev);
 
@@ -137,7 +141,8 @@ void cluster_main(){
 	//printf("[%d] apu_wb = %lu\n", id, apu_wb/REPEAT);
     
 	pi_cl_team_barrier();
-    
+   
+#ifdef DEBUG       	
 	if(pi_core_id()==0){
 	printf("\n\nQ = \n");
 		for(int i=0; i<N_CHANNELS; i++){
@@ -153,8 +158,8 @@ void cluster_main(){
 			printf("\n");
 		}
 	}
-
 	pi_cl_team_barrier();
+#endif	
 }
 
 inline float Sqrt(float x) {
@@ -163,6 +168,9 @@ inline float Sqrt(float x) {
 	return res;
 }
 
+#pragma GCC push_options
+#pragma GCC optimize ("-O3")
+__attribute__ ((noinline))
 float norm(float *v, int row, int column){ 
 	n = 0.0f;
 	int j;
@@ -224,7 +232,6 @@ float norm(float *v, int row, int column){
 	return n;
 	
 }
-
 
 void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input[][N_CHANNELS]){
 	int j;

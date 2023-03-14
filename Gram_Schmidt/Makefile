@@ -10,12 +10,11 @@ APP_CFLAGS += -DNUM_CORES=1
 endif
 endif
 
-APP_CFLAGS += -Os -g -lm
-APP_LDFLAGS += -Os -g -lm
+APP_CFLAGS += -Os -g
+APP_LDFLAGS += 
 
 #APP_CFLAGS += -mhwloopalign	
 #APP_CFLAGS += -DUNROLL_INNER_LOOP
 
 
 include $(RULES_DIR)/pmsis_rules.mk
-#include pmsis_rules.mk
