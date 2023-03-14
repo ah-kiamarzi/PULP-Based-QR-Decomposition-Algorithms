@@ -201,6 +201,7 @@ float norm(float *v, int row, int column){
 			temp1 += val1;
 		}
         	n = temp0 + temp1;
+		n = Sqrt(n);
 	}
 
 	pi_cl_team_barrier();
@@ -218,15 +219,17 @@ float norm(float *v, int row, int column){
 		float t0 = v[row-1];
 		n = n + t0 * t0;
 	}
+	n = Sqrt(n);
 
 #endif
-	return Sqrt(n);
+	return n;
 	
 }
 
 
 void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input[][N_CHANNELS]){
 	int j;
+	float res;
 
 	#if NUM_CORES > 1
 	int core_id = pi_core_id();
@@ -362,12 +365,19 @@ void qr_gramSmidt(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE], float input
 			pi_cl_team_barrier();
 			#endif
 		}
-		#if NUM_CORES > 1 
+
+		res = norm(&Q[k][0],N_CHANNELS,N_CHANNELS);
+
+		#if NUM_CORES > 1
+		if(core_id == 0) {
+			R[k][k] = res;
+	       	        rk = one / res;
+		}
 		pi_cl_team_barrier();
+		#else
+		R[k][k] = res;
+		rk = one / res;
 		#endif
-		
-		R[k][k] = norm(&Q[k][0],N_CHANNELS,N_CHANNELS);
-		rk = one/R[k][k];
 		
 		#if NUM_CORES > 1
 		for( j = start_NC; j < end_NC; j+=2){
