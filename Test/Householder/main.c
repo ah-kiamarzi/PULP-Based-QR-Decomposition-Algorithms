@@ -254,7 +254,7 @@ double norm(double *v, int row){
 	
 	#endif
 
-	return sqrtl(n);
+	return sqrt(n);
 	
 }
 
@@ -480,7 +480,7 @@ void qr_household(double Q[][N_CHANNELS], double R[][EV_WINDOWS_SIZE]){
 
 		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
 			if(j == i){
-				if(sel_col[0] >= 0){
+				if(sel_col[j] >= 0){
 					v[j] = sel_col[j] + temp;
 				}else{
 					v[j] = sel_col[j] - temp;
@@ -495,7 +495,7 @@ void qr_household(double Q[][N_CHANNELS], double R[][EV_WINDOWS_SIZE]){
 
 		for(int j=0;j<N_CHANNELS;j++){
 			if(j == i){
-				if(sel_col[0] >= 0){
+				if(sel_col[j] >= 0){
 					v[j] = sel_col[j] + temp;
 				}else{
 					v[j] = sel_col[j] - temp;
@@ -524,7 +524,7 @@ void qr_household(double Q[][N_CHANNELS], double R[][EV_WINDOWS_SIZE]){
 
 		pi_cl_team_barrier();
         if(pi_core_id()==0){
-            for(j=0; j<NUM_CORES; j++){
+            for(int j=0; j<NUM_CORES; j++){
                 temp += buffer[j];
             }
 		}
