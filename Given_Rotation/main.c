@@ -9,7 +9,7 @@
 
 #define MAX(a,b) ((a) > (b))? (a): (b)
 
-#define STACK_SIZE 2048
+#define STACK_SIZE 1024
 #define MOUNT 1
 #define UNMOUNT 0
 #define CID 0

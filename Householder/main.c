@@ -12,6 +12,23 @@
 
 
 
+// PI_L1 float Q[N_CHANNELS][N_CHANNELS]; 
+// PI_L1 float R[N_CHANNELS][EV_WINDOWS_SIZE];
+// PI_L1 float v[N_CHANNELS];
+// PI_L1 float sel_col[N_CHANNELS];
+// PI_L1 float Q_temp[N_CHANNELS][N_CHANNELS];
+// PI_L1 float R_temp[N_CHANNELS][EV_WINDOWS_SIZE];
+// PI_L1 float H[N_CHANNELS][N_CHANNELS];
+// PI_L1 float input_temp[N_CHANNELS][EV_WINDOWS_SIZE];
+// PI_L1 float n;
+// PI_L1 int i2;
+// PI_L1 float zero = 0;
+// PI_L1 float one = 1;
+// PI_L1 float two = 2;
+// PI_L1 float temp;
+// PI_L1 static float buffer[NUM_CORES];
+// PI_L1 static int idx[NUM_CORES];
+
 PI_L1 float Q[N_CHANNELS][N_CHANNELS]; 
 PI_L1 float R[N_CHANNELS][EV_WINDOWS_SIZE];
 PI_L1 float v[N_CHANNELS];
@@ -30,20 +47,8 @@ PI_L1 static float buffer[NUM_CORES];
 PI_L1 static int idx[NUM_CORES];
 
 
-
-unsigned long cycles = 0;
-unsigned long instr = 0;
-unsigned long active = 0;
-unsigned long ldext = 0;
-unsigned long tcdmcont = 0;
-unsigned long ldstall = 0;
-unsigned long imiss = 0;
-unsigned long apu_cont = 0;
-unsigned long apu_dep = 0;
-unsigned long apu_type = 0;
-unsigned long apu_wb = 0;
-
 void cluster_main();
+//void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]);
 void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]);
 void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O);
 
@@ -79,6 +84,19 @@ int main(){
 
 
 void cluster_main(){
+
+	unsigned long cycles = 0;
+	unsigned long instr = 0;
+	unsigned long active = 0;
+	unsigned long ldext = 0;
+	unsigned long tcdmcont = 0;
+	unsigned long ldstall = 0;
+	unsigned long imiss = 0;
+	unsigned long apu_cont = 0;
+	unsigned long apu_dep = 0;
+	unsigned long apu_type = 0;
+	unsigned long apu_wb = 0;
+
 
 	pi_perf_conf(
 	(1<<PI_PERF_CYCLES) | 
@@ -129,10 +147,10 @@ void cluster_main(){
 	ldstall  = pi_perf_read (PI_PERF_LD_STALL);
 	imiss    = pi_perf_read (PI_PERF_IMISS);
 	
-	apu_cont = pi_perf_read (0x12);
-	apu_dep  = pi_perf_read (0x13);
+	//apu_cont = pi_perf_read (0x12);
+	//apu_dep  = pi_perf_read (0x13);
 	//apu_type = pi_perf_read __SPRREAD (0x791);
-	apu_wb   = pi_perf_read (0x14);
+	//apu_wb   = pi_perf_read (0x14);
    
     
 	int id = pi_core_id();
@@ -150,22 +168,33 @@ void cluster_main(){
     
 	pi_cl_team_barrier();
     
-	/*if(pi_core_id()==0){
-	printf("\n\nQ = \n");
+	if(pi_core_id()==0){
+		printf("\n\nQ = \n");
 		for(int i=0; i<N_CHANNELS; i++){
 			for(int j=0; j<N_CHANNELS; j++)
-				printf("%f ", Q[i][j]);
+				printf("%e ", Q[i][j]);
 			printf("\n");
 		}
 
-	printf("\n\nR = \n");
+		printf("\n\nR = \n");
 		for(int i=0; i<N_CHANNELS; i++){
 			for(int j=0; j<EV_WINDOWS_SIZE; j++)
-				printf("%f ", R[i][j]);
+				printf("%e ", R[i][j]);
 			printf("\n");
 		}
-	}*/
-
+		printf("\n\nRes = \n");
+		float res[N_CHANNELS][EV_WINDOWS_SIZE];
+		for (int i = 0; i < N_CHANNELS; i++) {
+			for (int j = 0; j < EV_WINDOWS_SIZE; j++) {
+				res[i][j] = 0;
+				for (int k = 0; k < N_CHANNELS; k++) {
+					res[i][j] += Q[i][k] * R[k][j];
+				}
+				printf("%e ", res[i][j]);
+			}
+			printf("\n");
+		}
+	}
 	pi_cl_team_barrier();
 }
 
@@ -177,6 +206,7 @@ inline float Sqrt(float x) {
 }
 
 
+//float norm(float *v, int row){
 float norm(float *v, int row){
 	i2=0;
 	n = 0.0f;
@@ -193,17 +223,8 @@ float norm(float *v, int row){
 	buffer[pi_core_id()]=0;
 	idx[pi_core_id()]=0;
 	
-	//for(j = start_row; (j<row) && (j<start_row + blockSize_row); j++){
 	for(j = start_row; (j<row) && (j<start_row + blockSize_row); j++){
-		//printf("id = %d\tblockSize_row = %d\tstart_row = %d\n",pi_core_id(),blockSize_row,start_row);
-
 		buffer[pi_core_id()] = buffer[pi_core_id()] + v[idx[pi_core_id()]+start_row]*v[idx[pi_core_id()]+start_row];
-		//idx[pi_core_id()]+=row;
-inline float Sqrt(float x) {
-        float res;
-        asm("fsqrt.s %0, %1":"=f"(res):"f"(x));
-        return res;
-}
 		idx[pi_core_id()]+=1;
 	}
 		
@@ -270,7 +291,6 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
             }
 	    
 #else	   
-	     
             for (j = 0; j < N; j++) {
                 float AVal0 = pSrcA[i * 2 * N + (j)];
                 float AVal1 = pSrcA[i * 2 * N + N + (j)];
@@ -301,6 +321,9 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
 	if (i == M && j == N && k >= O) {
 
     } else {
+		if (core_id >= O/2){
+			i = 0;
+		}
         uint32_t iEnd = i;
         uint32_t jEnd = j;
         uint32_t kEnd = k >= O ? O : k;
@@ -309,7 +332,7 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
         if (jEnd != N) {
             for (i = 0; i < iEnd; i++) {
                 for (k = 0; k < kEnd; k += NUM_CORES) {
-                    int32_t sum = 0;
+                    float sum = 0;
                     for (j = jEnd; j < N; j++) {
                         sum += sum + pSrcA[i * N + j] * pSrcB[j * O + k];
                     }
@@ -322,7 +345,7 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
         if (iEnd != M) {
             for (k = core_id; k < kEnd; k += NUM_CORES) {
                 for (i = iEnd; i < M; i++) {
-                    int32_t sum = 0;
+                    float sum = 0;
                     for (j = 0; j < N; j++) {
                         sum = sum + pSrcA[i * N + j] * pSrcB[j * O + k];
                     }
@@ -332,9 +355,9 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
         }
 
         // clean up for k
-        for (k = kEnd; k < O; k += NUM_CORES) {
+        for (k = kEnd; k < O; k += NUM_CORES) {	
             for (i = 0; i < M; i++) {
-                int32_t sum = 0;
+                float sum = 0;
                 for (j = 0; j < N; j++) {
                     sum = sum + pSrcA[i * N + j] * pSrcB[j * O + k];
                 }
@@ -349,11 +372,7 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
 
 #pragma GCC pop_options
 
-
-
 void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
-	int j;
-
 	for(int i=0;i<EV_WINDOWS_SIZE;i++){
 		
 
@@ -404,10 +423,10 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 				sel_col[j] = R[j][i];
 			}
 		}
-
+		pi_cl_team_barrier();
 		#else
 
-		for(j=0;j<N_CHANNELS;j++){
+		for(int j=0;j<N_CHANNELS;j++){
 			if(j<i){
 				sel_col[j] = zero;
 			}else{
@@ -417,15 +436,13 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 
 		#endif
 
-		pi_cl_team_barrier();
 		temp = norm(&sel_col[0],N_CHANNELS);
-		pi_cl_team_barrier();
 
     	#if NUM_CORES > 1
 
 		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
 			if(j == i){
-				if(sel_col[0] >= 0){
+				if(sel_col[j] >= 0){
 					v[j] = sel_col[j] + temp;
 				}else{
 					v[j] = sel_col[j] - temp;
@@ -438,9 +455,9 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 
 		#else
 
-		for(j=0;j<N_CHANNELS;j++){
+		for(int j=0;j<N_CHANNELS;j++){
 			if(j == i){
-				if(sel_col[0] >= 0){
+				if(sel_col[j] >= 0){
 					v[j] = sel_col[j] + temp;
 				}else{
 					v[j] = sel_col[j] - temp;
@@ -451,6 +468,7 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 		}
 
 		#endif
+		pi_cl_team_barrier();
 
 		temp = zero;
 
@@ -469,11 +487,10 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 
 		pi_cl_team_barrier();
         if(pi_core_id()==0){
-            for(j=0; j<NUM_CORES; j++){
+            for(int j=0; j<NUM_CORES; j++){
                 temp += buffer[j];
             }
 		}
-
 		pi_cl_team_barrier();
 
 		#else
@@ -481,6 +498,7 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 		for (int j = 0; j < N_CHANNELS; j++){
 			temp = temp + v[j]*v[j];
 		}
+
 		#endif
 
     	#if NUM_CORES > 1
@@ -493,10 +511,9 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 			}
 		}
 		pi_cl_team_barrier();
-
 		#else
 
-		for (j = i; j < N_CHANNELS; j++){
+		for (int j = i; j < N_CHANNELS; j++){
 			for(int k = i; k < N_CHANNELS; k++){
 				H[j][k] = H[j][k] - two*v[k]*v[j]/temp;
 			}
@@ -506,7 +523,37 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 
 		matMul(&H[0][0],&R[0][0],&R_temp[0][0],N_CHANNELS,N_CHANNELS,EV_WINDOWS_SIZE);
 		matMul(&Q[0][0],&H[0][0],&Q_temp[0][0],N_CHANNELS,N_CHANNELS,N_CHANNELS);
-		
+
+		// pi_cl_team_barrier();
+
+		// if (pi_core_id() == 0)
+		// {
+
+		// 	// for (int i1 = 0; i1 < N_CHANNELS; i1++) {
+		// 	// 	for (int j1 = 0; j1 < EV_WINDOWS_SIZE; j1++) {
+		// 	// 		R_temp[i1][j1] = 0;
+		// 	// 		for (int k1 = 0; k1 < N_CHANNELS; k1++) {
+		// 	// 			R_temp[i1][j1] += H[i1][k1] * R[k1][j1];
+		// 	// 		}
+		// 	// 		//printf("%f ", R_temp[i][j]);
+		// 	// 	}
+		// 	// 	//printf("\n");
+		// 	// }
+
+
+		// 	// for (int i1 = 0; i1 < N_CHANNELS; i1++) {
+		// 	// 	for (int j1 = 0; j1 < N_CHANNELS; j1++) {
+		// 	// 		Q_temp[i1][j1] = 0;
+		// 	// 		for (int k1 = 0; k1 < N_CHANNELS; k1++) {
+		// 	// 			Q_temp[i1][j1] += Q[i1][k1] * H[k1][j1];
+		// 	// 		}
+		// 	// 		//printf("%f ", R_temp[i][j]);
+		// 	// 	}
+		// 	// 	//printf("\n");
+		// 	// }			
+		// }
+
+
 		pi_cl_team_barrier();
 
 		#if NUM_CORES > 1
@@ -516,11 +563,10 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 				R[j][k] = R_temp[j][k];
 			}
 		}
-		pi_cl_team_barrier();
 
 		#else
 
-		for(j = 0;j < N_CHANNELS; j++){//??????
+		for(int j = 0;j < N_CHANNELS; j++){//??????
 			for(int k = 0; k < EV_WINDOWS_SIZE; k++){
 				R[j][k] = R_temp[j][k];
 			}
@@ -539,7 +585,7 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 
 		#else
 
-		for(j = 0;j < N_CHANNELS; j++){//??????
+		for(int j = 0;j < N_CHANNELS; j++){//??????
 			for(int k = 0; k < N_CHANNELS; k++){
 				Q[j][k] = Q_temp[j][k];
 			}
