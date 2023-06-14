@@ -18,4 +18,3 @@ APP_LDFLAGS += -Os -g -lm
 
 
 include $(RULES_DIR)/pmsis_rules.mk
-#include pmsis_rules.mk

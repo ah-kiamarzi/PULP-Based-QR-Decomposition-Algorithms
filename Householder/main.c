@@ -1,7 +1,7 @@
 #include "pmsis.h"
 #include "stats.h" 
-#include "qr.h"
-#include "data.inc"
+#include "inputData/qr40X40.h"
+#include "inputData/data40X40.inc"
 #include <math.h>
 
 #define STATS 
@@ -12,14 +12,13 @@
 
 
 
-// PI_L1 float Q[N_CHANNELS][N_CHANNELS]; 
-// PI_L1 float R[N_CHANNELS][EV_WINDOWS_SIZE];
-// PI_L1 float v[N_CHANNELS];
-// PI_L1 float sel_col[N_CHANNELS];
-// PI_L1 float Q_temp[N_CHANNELS][N_CHANNELS];
-// PI_L1 float R_temp[N_CHANNELS][EV_WINDOWS_SIZE];
-// PI_L1 float H[N_CHANNELS][N_CHANNELS];
-// PI_L1 float input_temp[N_CHANNELS][EV_WINDOWS_SIZE];
+// PI_L1 float Q[N_ROW][N_ROW]; 
+// PI_L1 float R[N_ROW][N_COL];
+// PI_L1 float v[N_ROW];
+// PI_L1 float sel_col[N_ROW];
+// PI_L1 float Q_temp[N_ROW][N_ROW];
+// PI_L1 float R_temp[N_ROW][N_COL];
+// PI_L1 float H[N_ROW][N_ROW];
 // PI_L1 float n;
 // PI_L1 int i2;
 // PI_L1 float zero = 0;
@@ -29,14 +28,13 @@
 // PI_L1 static float buffer[NUM_CORES];
 // PI_L1 static int idx[NUM_CORES];
 
-PI_L1 float Q[N_CHANNELS][N_CHANNELS]; 
-PI_L1 float R[N_CHANNELS][EV_WINDOWS_SIZE];
-PI_L1 float v[N_CHANNELS];
-PI_L1 float sel_col[N_CHANNELS];
-PI_L1 float Q_temp[N_CHANNELS][N_CHANNELS];
-PI_L1 float R_temp[N_CHANNELS][EV_WINDOWS_SIZE];
-PI_L1 float H[N_CHANNELS][N_CHANNELS];
-PI_L1 float input_temp[N_CHANNELS][EV_WINDOWS_SIZE];
+PI_L1 float Q[N_ROW][N_ROW]; 
+PI_L1 float R[N_ROW][N_COL];
+PI_L1 float v[N_ROW];
+PI_L1 float sel_col[N_ROW];
+PI_L1 float Q_temp[N_ROW][N_ROW];
+PI_L1 float R_temp[N_ROW][N_COL];
+PI_L1 float H[N_ROW][N_ROW];
 PI_L1 float n;
 PI_L1 int i2;
 PI_L1 float zero = 0;
@@ -47,9 +45,18 @@ PI_L1 static float buffer[NUM_CORES];
 PI_L1 static int idx[NUM_CORES];
 
 
+int cyclesArr[NUM_CORES];
+int instrArr[NUM_CORES];
+int activeArr[NUM_CORES];
+int ldEXTArr[NUM_CORES];
+int TCDMArr[NUM_CORES];
+int ldstallArr[NUM_CORES];
+int imissArr[NUM_CORES];
+
+
 void cluster_main();
-//void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]);
-void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]);
+//void qr_household(float Q[][N_ROW], float R[][N_COL]);
+void qr_household(float Q[][N_ROW], float R[][N_COL]);
 void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O);
 
 void pe_entry(void *arg){cluster_main();}
@@ -112,8 +119,8 @@ void cluster_main(){
 	(1<<0x14));
   
 	if (pi_core_id()==0){ 
-		for(int i=0; i<N_CHANNELS; i++){
-			for(int j=0; j<N_CHANNELS; j++){
+		for(int i=0; i<N_ROW; i++){
+			for(int j=0; j<N_ROW; j++){
 				if(i == j){
 					Q[i][j]=1;
 				}else{
@@ -123,8 +130,8 @@ void cluster_main(){
 		}
 
 
-		for(int i=0; i<N_CHANNELS; i++){
-			for(int j=0; j<EV_WINDOWS_SIZE; j++){
+		for(int i=0; i<N_ROW; i++){
+			for(int j=0; j<N_COL; j++){
 				R[i][j]=input[i][j];            
 			}
 		}
@@ -153,6 +160,46 @@ void cluster_main(){
 	//apu_wb   = pi_perf_read (0x14);
    
     
+	cyclesArr[pi_core_id()] = cycles/REPEAT;
+	instrArr[pi_core_id()] = instr/REPEAT;
+	activeArr[pi_core_id()] = active/REPEAT;
+	ldEXTArr[pi_core_id()] = ldext/REPEAT;
+	TCDMArr[pi_core_id()] = tcdmcont/REPEAT;
+	ldstallArr[pi_core_id()] = ldstall/REPEAT;
+	imissArr[pi_core_id()] = imiss/REPEAT;
+
+	if(pi_core_id() == 0){
+		long int AVGCycles = 0;
+		long int AVGInstr = 0;
+		long int AVGActive = 0;
+		long int AVGldEXT = 0;
+		long int AVGTCDM = 0;
+		long int AVGLdstall = 0;
+		long int AVGImiss = 0;
+		for (int i = 0; i < NUM_CORES; i++){
+			AVGCycles += cyclesArr[i];
+			AVGInstr += instrArr[i];
+			AVGActive += activeArr[i];
+			AVGldEXT += ldEXTArr[i];
+			AVGTCDM += TCDMArr[i];
+			AVGLdstall += ldstallArr[i];
+			AVGImiss += imissArr[i];
+		}
+		printf("AVGCycles = %lu\n",AVGCycles/NUM_CORES);
+		printf("AVGInstr = %lu\n",AVGInstr/NUM_CORES);
+		printf("AVGActive = %lu\n",AVGActive/NUM_CORES);
+		printf("AVGldEXT = %lu\n",AVGldEXT/NUM_CORES);
+		printf("AVGTCDM = %lu\n",AVGTCDM/NUM_CORES);
+		printf("AVGLdstall = %lu\n",AVGLdstall/NUM_CORES);
+		printf("AVGImiss = %lu\n",AVGImiss/NUM_CORES);
+
+
+		printf("%lu\t%lu\t%lu\t%lu\t%lu\t%lu\t%lu\n",AVGCycles/NUM_CORES,AVGInstr/NUM_CORES,AVGActive/NUM_CORES,AVGldEXT/NUM_CORES
+		,AVGTCDM/NUM_CORES,AVGLdstall/NUM_CORES,AVGImiss/NUM_CORES);
+	}
+
+	pi_cl_team_barrier();
+
 	int id = pi_core_id();
 	printf("[%d] cycles = %lu\n", id, cycles/REPEAT);
 	printf("[%d] instr = %lu\n", id, instr/REPEAT);
@@ -168,33 +215,33 @@ void cluster_main(){
     
 	pi_cl_team_barrier();
     
-	if(pi_core_id()==0){
-		printf("\n\nQ = \n");
-		for(int i=0; i<N_CHANNELS; i++){
-			for(int j=0; j<N_CHANNELS; j++)
-				printf("%e ", Q[i][j]);
-			printf("\n");
-		}
+	// if(pi_core_id()==0){
+	// 	printf("\n\nQ = \n");
+	// 	for(int i=0; i<N_ROW; i++){
+	// 		for(int j=0; j<N_ROW; j++)
+	// 			printf("%.20f ", Q[i][j]);
+	// 		printf("\n");
+	// 	}
 
-		printf("\n\nR = \n");
-		for(int i=0; i<N_CHANNELS; i++){
-			for(int j=0; j<EV_WINDOWS_SIZE; j++)
-				printf("%e ", R[i][j]);
-			printf("\n");
-		}
-		printf("\n\nRes = \n");
-		float res[N_CHANNELS][EV_WINDOWS_SIZE];
-		for (int i = 0; i < N_CHANNELS; i++) {
-			for (int j = 0; j < EV_WINDOWS_SIZE; j++) {
-				res[i][j] = 0;
-				for (int k = 0; k < N_CHANNELS; k++) {
-					res[i][j] += Q[i][k] * R[k][j];
-				}
-				printf("%e ", res[i][j]);
-			}
-			printf("\n");
-		}
-	}
+	// 	printf("\n\nR = \n");
+	// 	for(int i=0; i<N_ROW; i++){
+	// 		for(int j=0; j<N_COL; j++)
+	// 			printf("%.20f ", R[i][j]);
+	// 		printf("\n");
+	// 	}
+	// 	printf("\n\nRes = \n");
+	// 	float res[N_ROW][N_COL];
+	// 	for (int i = 0; i < N_ROW; i++) {
+	// 		for (int j = 0; j < N_COL; j++) {
+	// 			res[i][j] = 0;
+	// 			for (int k = 0; k < N_ROW; k++) {
+	// 				res[i][j] += Q[i][k] * R[k][j];
+	// 			}
+	// 			printf("%.20f ", res[i][j]);
+	// 		}
+	// 		printf("\n");
+	// 	}
+	// }
 	pi_cl_team_barrier();
 }
 
@@ -239,15 +286,18 @@ float norm(float *v, int row){
 	#else
 
 
+	// for(j=0; j<row;j++){
+	// 	n = n + v[i2]*v[i2];
+	// 	i2++;
+	// }
 	for(j=0; j<row;j++){
-		n = n + v[i2]*v[i2];
-		i2++;
+		n = n + v[j]*v[j];
 	}
-	
 	#endif
 
-	return sqrt(n);
-	
+	// return Sqrt(n);
+	return sqrtf(n);
+
 }
 
 
@@ -372,25 +422,25 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
 
 #pragma GCC pop_options
 
-void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
-	for(int i=0;i<EV_WINDOWS_SIZE;i++){
+void qr_household(float Q[][N_ROW], float R[][N_COL]){
+	for(int i=0;i<N_COL;i++){
 		
 
 
     	#if NUM_CORES > 1
-        int blockSize_NC = N_CHANNELS/NUM_CORES;
-        int start_NC = pi_core_id()*blockSize_NC;
+        int blockSize_ROW = N_ROW/NUM_CORES;
+        int start_ROW = pi_core_id()*blockSize_ROW;
 
         if(pi_core_id()==(NUM_CORES - 1)){
-            blockSize_NC = N_CHANNELS - (NUM_CORES - 1)* blockSize_NC;}
+            blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
 		#endif
 
 
 
     	#if NUM_CORES > 1
 
-		for(int k = start_NC; k < (start_NC + blockSize_NC); k++){
-			for(int j=0; j<N_CHANNELS; j++){
+		for(int k = start_ROW; k < (start_ROW + blockSize_ROW); k++){
+			for(int j=0; j<N_ROW; j++){
 				if(k == j){
 					H[k][j]=one;
 				}else{
@@ -401,8 +451,8 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 
 		#else
 
-		for(int k=0; k<N_CHANNELS; k++){
-			for(int j=0; j<N_CHANNELS; j++){
+		for(int k=0; k<N_ROW; k++){
+			for(int j=0; j<N_ROW; j++){
 				if(k == j){
 					H[k][j]=one;
 				}else{
@@ -411,63 +461,197 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 			}
 		}
 
+
+		// pi_cl_team_barrier();
+		// if(pi_core_id() == 0){
+		// 	printf("H\n");
+		// 	for(int j = 0; j < N_ROW; j++){
+		// 		for(int k = 0; k < N_ROW; k++){
+		// 			// printf("%.7f\t",sel_col[j]);
+		// 			printf("%e\t",H[j][k]);
+		// 		}
+		// 		printf("\n");
+		// 	}
+		// 	printf("\n");
+		// }
+		// pi_cl_team_barrier();
+
+
+
 		#endif
 
 
     	#if NUM_CORES > 1
 
-		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
+		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+			// if(j<i){
+			// 	sel_col[j] = zero;
+			// }else{
+			// 	sel_col[j] = R[j][i];
+			// }
+			float Rji0 = R[j][i];			
 			if(j<i){
 				sel_col[j] = zero;
+			}else if((j+1) <(start_ROW + blockSize_ROW)){
+				float Rj0, Rj1;
+				Rj0 = R[j][i];
+				Rj1 = R[j+1][i];
+				sel_col[j] = Rj0;
+				sel_col[j+1] = Rj1;
+				j++;
 			}else{
-				sel_col[j] = R[j][i];
+				sel_col[j] = Rji0;
 			}
 		}
 		pi_cl_team_barrier();
 		#else
 
-		for(int j=0;j<N_CHANNELS;j++){
+		for(int j=0;j<N_ROW;j++){
+			// if(j<i){
+			// 	sel_col[j] = zero;
+			// }else{
+			// 	sel_col[j] = R[j][i];
+			// }
+			float Rji0 = R[j][i];
 			if(j<i){
 				sel_col[j] = zero;
+			}else if((j+1) < N_ROW){
+				float Rj0, Rj1;
+				Rj0 = R[j][i];
+				Rj1 = R[j+1][i];
+				sel_col[j] = Rj0;
+				sel_col[j+1] = Rj1;
+				j++;
 			}else{
-				sel_col[j] = R[j][i];
+				sel_col[j] = Rji0;
 			}
 		}
 
 		#endif
 
-		temp = norm(&sel_col[0],N_CHANNELS);
+		// pi_cl_team_barrier();
+		// if(pi_core_id() == 0){
+		// 	printf("sel_col\n");
+		// 	for(int j = 0; j < N_ROW; j++){
+		// 		printf("%.10f\t",sel_col[j]);
+		// 		// printf("%e\t",sel_col[j]);
+		// 	}
+		// 	printf("\n");
+		// }
+		pi_cl_team_barrier();
+
+		temp = norm(&sel_col[0],N_ROW);
+
+		pi_cl_team_barrier();
+		// if(pi_core_id() == 0){
+		// 	printf("norm = %.10f\n",temp);
+		// 	// printf("norm = %e\n",temp);
+		// }
+		// pi_cl_team_barrier();
+
 
     	#if NUM_CORES > 1
 
-		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
+		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+		// 	if(j == i){
+		// 		if(sel_col[j] >= 0){
+		// 			v[j] = sel_col[j] + temp;
+		// 		}else{
+		// 			v[j] = sel_col[j] - temp;
+		// 		}
+		// 	}else{
+		// 		v[j] = sel_col[j];
+		// 	}
+		// }
+
+		float sel_coli;
+		if(i < N_ROW){
+			sel_coli = sel_col[i];
+		}
+		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
 			if(j == i){
-				if(sel_col[j] >= 0){
-					v[j] = sel_col[j] + temp;
+				if(sel_coli >= 0){
+					v[j] = sel_coli + temp;
 				}else{
-					v[j] = sel_col[j] - temp;
+					v[j] = sel_coli - temp;
 				}
+			// }else if((j+1) == i){
+			// 	float sel_col0;
+			// 	sel_col0 = sel_col[j];
+			// 	v[j] = sel_col0;
+			}else if(j+1 < (start_ROW + blockSize_ROW)){
+				float sel_col0, sel_col1;
+				sel_col0 = sel_col[j];
+				sel_col1 = sel_col[j+1];
+				v[j] = sel_col0;
+				v[j+1] = sel_col1;
+				j++;
 			}else{
-				v[j] = sel_col[j];
+				float sel_col0;
+				sel_col0 = sel_col[j];
+				v[j] = sel_col0;				
 			}
 		}
+
 		pi_cl_team_barrier();
 
 		#else
 
-		for(int j=0;j<N_CHANNELS;j++){
+		// for(int j=0;j<N_ROW;j++){
+		// 	if(j == i){
+		// 		if(sel_col[j] >= 0){
+		// 			v[j] = sel_col[j] + temp;
+		// 		}else{
+		// 			v[j] = sel_col[j] - temp;
+		// 		}
+		// 	}else{
+		// 		v[j] = sel_col[j];
+		// 	}
+		// }
+
+
+		float sel_coli;
+		if(i < N_ROW){
+			sel_coli = sel_col[i];
+		}
+		for(int j=0;j<N_ROW;j++){
 			if(j == i){
-				if(sel_col[j] >= 0){
-					v[j] = sel_col[j] + temp;
+				if(sel_coli >= 0){
+					v[j] = sel_coli + temp;
 				}else{
-					v[j] = sel_col[j] - temp;
+					v[j] = sel_coli - temp;
 				}
-			}else{
-				v[j] = sel_col[j];
+			}else if(j+1 < N_ROW){
+				float sel_col0, sel_col1;
+				sel_col0 = sel_col[j];
+				sel_col1 = sel_col[j+1];
+				v[j] = sel_col0;
+				v[j+1] = sel_col1;
+				j++;
+			}
+			else{
+				float sel_col0;
+				sel_col0 = sel_col[j];
+				v[j] = sel_col0;
 			}
 		}
 
+
 		#endif
+
+		// pi_cl_team_barrier();
+		// if(pi_core_id() == 0){
+		// 	printf("v\n");
+		// 	for(int j = 0; j < N_ROW; j++){
+		// 		printf("%.20f\t",v[j]);
+		// 		// printf("%e\t",v[j]);
+		// 	}
+		// 	printf("\n");
+		// }
+		// pi_cl_team_barrier();
+
+
+
 		pi_cl_team_barrier();
 
 		temp = zero;
@@ -479,9 +663,9 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
         idx[pi_core_id()]=0;
 
 
-		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
+		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
 
-			buffer[pi_core_id()] = buffer[pi_core_id()] + v[idx[pi_core_id()]+start_NC]*v[idx[pi_core_id()]+start_NC];
+			buffer[pi_core_id()] = buffer[pi_core_id()] + v[idx[pi_core_id()]+start_ROW]*v[idx[pi_core_id()]+start_ROW];
 			idx[pi_core_id()] = idx[pi_core_id()] + 1;
 		}
 
@@ -495,99 +679,256 @@ void qr_household(float Q[][N_CHANNELS], float R[][EV_WINDOWS_SIZE]){
 
 		#else
 
-		for (int j = 0; j < N_CHANNELS; j++){
-			temp = temp + v[j]*v[j];
+		// for (int j = 0; j < N_ROW; j++){
+		// 	temp = temp + v[j]*v[j];
+		// }
+
+		for(int j=0; (j+1)<N_ROW; j+=2){
+			float vj0 = v[j];float vj1 = v[j+1];
+			float sumTemp = vj0*vj0;
+			sumTemp = sumTemp + vj1*vj1;
+			temp = temp + sumTemp;
 		}
+			
+		if(N_ROW%2){
+			float t0 = v[N_ROW-1];
+			float sumTemp = t0*t0;
+			temp = temp + sumTemp;
+		}
+
 
 		#endif
 
+		// pi_cl_team_barrier();
+		// if(pi_core_id() == 0){
+		// 	printf("temp = %.10f\n",temp);
+		// 	// printf("temp = %e\n",temp);
+		// }
+		// pi_cl_team_barrier();
+
     	#if NUM_CORES > 1
 
-		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
+		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+		// 	if(j >= i){
+		// 		for(int k = i; k < N_ROW; k++){
+		// 			H[j][k] = H[j][k] - two*v[k]*v[j]/temp;
+		// 		}
+		// 	}
+		// }
+
+		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+			int k;
+			float vj = v[j];
+			float vjx2 = vj*two;
 			if(j >= i){
-				for(int k = i; k < N_CHANNELS; k++){
-					H[j][k] = H[j][k] - two*v[k]*v[j]/temp;
+				for(k = i; k+1 < N_ROW; k+=2){
+					// printf("id = %d\tstart_ROW = %d\tblockSize_ROW = %d\ti = %d\t j = %d\t k = %d\n",pi_core_id(),start_ROW,blockSize_ROW,i,j,k);	
+					float Hjk0 ,Hjk1;
+					float vk0 ,vk1;
+					vk0 = v[k];
+					Hjk0 = H[j][k];
+					vk1 = v[k+1];
+					Hjk1 = H[j][k+1];
+					// H[j][k] = Hjk0 - vk0*vjx2;
+					// H[j][k+1] = Hjk1 - vk1*vjx2;
+					H[j][k] = Hjk0 - vk0*vjx2/temp;
+					H[j][k+1] = Hjk1 - vk1*vjx2/temp;
+				}
+				if(k < N_ROW){
+					float Hjk0;
+					float vk0;
+					vk0 = v[k];
+					Hjk0 = H[j][k];
+					H[j][k] = Hjk0 - vk0*vjx2/temp;					
 				}
 			}
 		}
 		pi_cl_team_barrier();
 		#else
 
-		for (int j = i; j < N_CHANNELS; j++){
-			for(int k = i; k < N_CHANNELS; k++){
-				H[j][k] = H[j][k] - two*v[k]*v[j]/temp;
+		// for (int j = i; j < N_ROW; j++){
+		// 	for(int k = i; k < N_ROW; k++){
+		// 		H[j][k] = H[j][k] - (two*v[k]*v[j])/temp;
+		// 	}
+		// }
+
+		for (int j = i; j < N_ROW; j++){
+			int k;
+			float vj = v[j];
+			float vjx2 = vj*two;
+			for(k = i; k+1 < N_ROW; k+=2){
+				float Hjk0 ,Hjk1;
+				float vk0 ,vk1;
+				vk0 = v[k];
+				Hjk0 = H[j][k];
+				vk1 = v[k+1];
+				Hjk1 = H[j][k+1];
+				H[j][k] = Hjk0 - vk0*vjx2/temp;
+				H[j][k+1] = Hjk1 - vk1*vjx2/temp;
+				// if(k == 0){
+				// 	printf("K is 0\n");
+				// }
+				
+			}
+			if(k < N_ROW){
+				float Hjk0;
+				float vk0;
+				vk0 = v[k];
+				Hjk0 = H[j][k];
+				H[j][k] = Hjk0 - vk0*vjx2/temp;
+				// if(k == 0){
+				// 	printf("K is 0\n");
+				// }
 			}
 		}
 
+
+
 		#endif
 
-		matMul(&H[0][0],&R[0][0],&R_temp[0][0],N_CHANNELS,N_CHANNELS,EV_WINDOWS_SIZE);
-		matMul(&Q[0][0],&H[0][0],&Q_temp[0][0],N_CHANNELS,N_CHANNELS,N_CHANNELS);
-
 		// pi_cl_team_barrier();
+		// if(pi_core_id() == 0){
+		// 	printf("H\n");
+		// 	for(int j = 0; j < N_ROW; j++){
+		// 		for(int k = 0; k < N_ROW; k++){
+		// 			printf("%.10f\t",H[j][k]);
+		// 			// printf("%e\t",H[j][k]);
+		// 		}
+		// 		printf("\n");
+		// 	}
+		// 	printf("\n");
+		// }
+		pi_cl_team_barrier();
+
+		matMul(&H[0][0],&R[0][0],&R_temp[0][0],N_ROW,N_ROW,N_COL);
+		matMul(&Q[0][0],&H[0][0],&Q_temp[0][0],N_ROW,N_ROW,N_ROW);
+
+		pi_cl_team_barrier();
 
 		// if (pi_core_id() == 0)
 		// {
 
-		// 	// for (int i1 = 0; i1 < N_CHANNELS; i1++) {
-		// 	// 	for (int j1 = 0; j1 < EV_WINDOWS_SIZE; j1++) {
-		// 	// 		R_temp[i1][j1] = 0;
-		// 	// 		for (int k1 = 0; k1 < N_CHANNELS; k1++) {
-		// 	// 			R_temp[i1][j1] += H[i1][k1] * R[k1][j1];
-		// 	// 		}
-		// 	// 		//printf("%f ", R_temp[i][j]);
-		// 	// 	}
-		// 	// 	//printf("\n");
-		// 	// }
+		// 	for (int i1 = 0; i1 < N_ROW; i1++) {
+		// 		for (int j1 = 0; j1 < N_COL; j1++) {
+		// 			R_temp[i1][j1] = 0;
+		// 			for (int k1 = 0; k1 < N_ROW; k1++) {
+		// 				R_temp[i1][j1] += H[i1][k1] * R[k1][j1];
+		// 			}
+		// 			//printf("%f ", R_temp[i][j]);
+		// 		}
+		// 		//printf("\n");
+		// 	}
 
 
-		// 	// for (int i1 = 0; i1 < N_CHANNELS; i1++) {
-		// 	// 	for (int j1 = 0; j1 < N_CHANNELS; j1++) {
-		// 	// 		Q_temp[i1][j1] = 0;
-		// 	// 		for (int k1 = 0; k1 < N_CHANNELS; k1++) {
-		// 	// 			Q_temp[i1][j1] += Q[i1][k1] * H[k1][j1];
-		// 	// 		}
-		// 	// 		//printf("%f ", R_temp[i][j]);
-		// 	// 	}
-		// 	// 	//printf("\n");
-		// 	// }			
+		// 	for (int i1 = 0; i1 < N_ROW; i1++) {
+		// 		for (int j1 = 0; j1 < N_ROW; j1++) {
+		// 			Q_temp[i1][j1] = 0;
+		// 			for (int k1 = 0; k1 < N_ROW; k1++) {
+		// 				Q_temp[i1][j1] += Q[i1][k1] * H[k1][j1];
+		// 			}
+		// 			//printf("%f ", R_temp[i][j]);
+		// 		}
+		// 		//printf("\n");
+		// 	}			
 		// }
 
-
-		pi_cl_team_barrier();
+		// pi_cl_team_barrier();
 
 		#if NUM_CORES > 1
 
-		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
-			for(int k = 0; k < EV_WINDOWS_SIZE; k++){
-				R[j][k] = R_temp[j][k];
+		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+		// 	for(int k = 0; k < N_COL; k++){
+		// 		R[j][k] = R_temp[j][k];
+		// 	}
+		// }
+
+		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+			int k;
+			for(k = 0; k+1 < N_COL; k+=2){
+				float R_temp0, R_temp1;
+				R_temp0 = R_temp[j][k];
+				R_temp1 = R_temp[j][k+1];
+				R[j][k] = R_temp0;
+				R[j][k+1] = R_temp1;
+			}
+			if(k < N_COL){
+				float R_temp0 = R_temp[j][k];
+				R[j][k] = R_temp0;
 			}
 		}
 
 		#else
 
-		for(int j = 0;j < N_CHANNELS; j++){//??????
-			for(int k = 0; k < EV_WINDOWS_SIZE; k++){
-				R[j][k] = R_temp[j][k];
+		// for(int j = 0;j < N_ROW; j++){//??????
+		// 	for(int k = 0; k < N_COL; k++){
+		// 		R[j][k] = R_temp[j][k];
+		// 	}
+		// }
+
+		for(int j = 0;j < N_ROW; j++){//??????
+			int k;
+			for(k = 0; k+1 < N_COL; k+=2){
+				float R_temp0, R_temp1;
+				R_temp0 = R_temp[j][k];
+				R_temp1 = R_temp[j][k+1];
+				R[j][k] = R_temp0;
+				R[j][k+1] = R_temp1;
 			}
+			if(k < N_COL){
+				float R_temp0 = R_temp[j][k];
+				R[j][k] = R_temp0;
+			}			
 		}
 
 		#endif
 		
 		#if NUM_CORES > 1
 
-		for(int j = start_NC; j < (start_NC + blockSize_NC); j++){
-			for(int k = 0; k < N_CHANNELS; k++){
-				Q[j][k] = Q_temp[j][k];
+		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+		// 	for(k = 0; k < N_ROW; k++){
+		// 		Q[j][k] = Q_temp[j][k];
+		// 	}
+		// }
+
+		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
+			int k;
+			for(k = 0; (k+1) < N_ROW; k+=2){
+				float Q_temp0, Q_temp1;
+				Q_temp0 = Q_temp[j][k];
+				Q_temp1 = Q_temp[j][k+1];
+				Q[j][k] = Q_temp0;
+				Q[j][k+1] = Q_temp1;
+			}
+			if(k < N_ROW){
+				float Q_temp0 = Q_temp[j][k];
+				Q[j][k] = Q_temp0;
 			}
 		}
+		
+		
 		pi_cl_team_barrier();
 
 		#else
 
-		for(int j = 0;j < N_CHANNELS; j++){//??????
-			for(int k = 0; k < N_CHANNELS; k++){
-				Q[j][k] = Q_temp[j][k];
+		// for(int j = 0;j < N_ROW; j++){//??????
+		// 	for(k = 0; k < N_ROW; k++){
+		// 		Q[j][k] = Q_temp[j][k];
+		// 	}
+		// }
+
+
+		for(int j = 0;j < N_ROW; j++){//??????
+			int k;
+			for(k = 0; (k+1) < N_ROW; k+=2){
+				float Q_temp0, Q_temp1;
+				Q_temp0 = Q_temp[j][k];
+				Q_temp1 = Q_temp[j][k+1];
+				Q[j][k] = Q_temp0;
+				Q[j][k+1] = Q_temp1;
+			}
+			if(k < N_ROW){
+				float Q_temp0 = Q_temp[j][k];
+				Q[j][k] = Q_temp0;
 			}
 		}
 
