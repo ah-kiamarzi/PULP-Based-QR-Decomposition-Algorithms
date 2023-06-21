@@ -15,10 +15,10 @@
 PI_L1 float Q[N_ROW][N_ROW]; 
 PI_L1 float R[N_ROW][N_COL];
 
-PI_L1 float n;
-PI_L1 int i2;
+//PI_L1 float n;
+//PI_L1 int i2;
 PI_L1 static float buffer[NUM_CORES];
-PI_L1 static int idx[NUM_CORES];
+//PI_L1 static int idx[NUM_CORES];
 PI_L1 float rk=0.0;
 PI_L1 static float temp[NUM_CORES];
 PI_L1 static float one = 1.0;
@@ -251,34 +251,43 @@ inline float Sqrt(float x) {
 #pragma GCC push_options
 #pragma GCC optimize ("-O3")
 __attribute__ ((noinline))
-float norm(float *v, int row, int column){ 
-	i2=0;
-	n = 0.0f;
-	int j;
+void  norm(float *v, int row, int column, int k, int blockSize_column, int start_column) { 
+	int i2 = 0;
+	float n = 0.0f;
+	int j, idx;
+
 	#if NUM_CORES > 1
+	int core_id = pi_core_id();
 
-	int blockSize_column = column/NUM_CORES;
-	int start_column = pi_core_id()*blockSize_column;
-	int start_matrice = pi_core_id()*blockSize_column;
+	int start_matrice = start_column;
 
-	if(pi_core_id()==(NUM_CORES - 1)){
-		blockSize_column = column - (NUM_CORES - 1)* blockSize_column;
+	buffer[core_id]=0;
+	idx=0;
+	
+	for(j = start_column; j<start_column + (blockSize_column & 0xfffffffe); j+=2){
+		float t0 = v[idx+start_matrice];
+		float t1 = v[idx+1+start_matrice];
+		asm volatile ("":::"memory");
+		buffer[core_id] = buffer[core_id] + t0*t0;
+		buffer[core_id] = buffer[core_id] + t1*t1;
+		idx+=2;
+		asm volatile ("":::"memory");
+
 	}
-	
-	buffer[pi_core_id()]=0;
-	idx[pi_core_id()]=0;
-	
-	for(j = start_column; (j<column) && (j<start_column + blockSize_column); j++){
-		buffer[pi_core_id()] = buffer[pi_core_id()] + v[idx[pi_core_id()]+start_matrice]*v[idx[pi_core_id()]+start_matrice];
-		idx[pi_core_id()]+=1;
+	if(blockSize_column & 0x1){
+		buffer[core_id] = buffer[core_id] + v[idx-1+start_matrice]*v[idx-1+start_matrice];
 	}
 		
 	pi_cl_team_barrier();
 			
-	if(pi_core_id()==0)
+	if(core_id==0)
+	{
 		for(j=0; j<NUM_CORES; j++){
 			n += buffer[j];
 		}
+		R[k][k] = Sqrt(n);
+		rk = 1/R[k][k];
+	}
 	pi_cl_team_barrier();
 	#else
 
@@ -297,8 +306,11 @@ float norm(float *v, int row, int column){
 		i2+=1*1;
 	}
 
+	R[k][k] = Sqrt(n);
+        rk = 1/R[k][k];
+
 	#endif
-	return sqrt(n);
+//	return sqrt(n);
 	
 }
 
@@ -310,6 +322,13 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 	int start_ROW = pi_core_id()*blockSize_ROW;
 	if(pi_core_id()==(NUM_CORES - 1)){
 		blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
+ 
+         int blockSize_column = N_COL/NUM_CORES;
+         int start_column = pi_core_id()*blockSize_column;
+         if(pi_core_id()==(NUM_CORES - 1)){
+	          blockSize_column = N_COL - (NUM_CORES - 1)* blockSize_column;
+         }
+	
 	#endif
 
 	for(int k=0; k<N_COL; k++){
@@ -432,18 +451,23 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 		// 	}
 		// }
 
-		R[k][k] = norm(&Q[k][0],N_ROW,N_ROW);
+		#if NUM_CORES > 1
+		norm(&Q[k][0],N_ROW,N_ROW,k, blockSize_column, start_column);
+		#else
+		norm(&Q[k][0],N_ROW,N_ROW,k, 0, 0);
+		#endif
+		//R[k][k] = norm(&Q[k][0],N_ROW,N_ROW);
 		// printf("R[k][k] = %.20f \n", R[k][k]);
-		rk = one/R[k][k];
+		//rk = one/R[k][k];
 
 		
 		#if NUM_CORES > 1
-		for( j = start_ROW; (j+1)<start_ROW + (blockSize_ROW & 0xFFFE); j+=2){
+		for( j = start_ROW; (j+1)<start_ROW + (blockSize_ROW & 0xFFFFFFFE); j+=2){
 			float Qjk0 = Q[k][j];float Qjk1 = Q[k][j+1];
 			Q[k][j] = Qjk0 * rk;
 			Q[k][j+1] = Qjk1 * rk;
 			
-		} if (j<start_ROW + (blockSize_ROW & 0xFFFE)){
+		} if (j<start_ROW + (blockSize_ROW & 0xFFFFFFFE)){
 			float Qjk0 = Q[j][k];
 			Q[k][j] = Qjk0 * rk;
 		}
