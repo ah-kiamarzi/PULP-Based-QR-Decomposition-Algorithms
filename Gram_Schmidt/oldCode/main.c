@@ -304,16 +304,6 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 		blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
 	int end_ROW = start_ROW + blockSize_ROW;
 
-	// int blockSize_COL = N_COL/NUM_CORES;
-	// int start_COL = core_id*blockSize_COL;
-	// if(core_id==(NUM_CORES - 1)){
-	// 	blockSize_COL = N_COL - (NUM_CORES - 1)* blockSize_COL;
-	// }
-	// int end_COL = start_COL + blockSize_COL;
-
-	// printf("id = %d\tstart_ROW = %d\tblockSize_ROW = %d\n",core_id,start_ROW,blockSize_ROW);
-
-
 	#endif
 
     
@@ -362,41 +352,16 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 				float ji0 = Q[i][j];float jk0 = Q[k][j];
 				temp[core_id] = temp[core_id] + (ji0 * jk0);
 			}
-			// pi_cl_team_barrier();
-			// BarrierCounter
-			
-			// if(core_id==0){
-			// 	for(j=0; j<NUM_CORES; j++){
-			// 		R[i][k]+=temp[j];
-			// 	}
-			// 	// printf("id = %d\t RTEMP = %f\n",core_id,R[i][k]);
-			// }
-				
-			// pi_cl_team_barrier();
-			// BarrierCounter
-
-
-			// RTEMP = R[i][k];
-
 			pi_cl_team_barrier();
 			BarrierCounter
 			
-			// if(core_id==0)
-			RTEMP = 0;
-			for(j=0; j<NUM_CORES; j++){
-				RTEMP+=temp[j];
+			if(core_id==0){
+			 	for(j=0; j<NUM_CORES; j++){
+			 		R[i][k]+=temp[j];
+			 	}
+			 	// printf("id = %d\t RTEMP = %f\n",core_id,R[i][k]);
 			}
-			// if(core_id == 0)
-			// 	printf("id = %d\t RTEMP = %f\n",core_id,RTEMP);
-			// printf("id = %d\t RTEMP = %f\n",core_id,RTEMP);
-
-			R[i][k] = RTEMP;
-			// pi_cl_team_barrier();
-			// BarrierCounter
-
-
-
-
+			
 			#else
 			for(j=0; (j+1)<N_ROW; j+=2){
 				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
@@ -450,8 +415,8 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 			#endif
 			
 			#if NUM_CORES > 1 
-			// pi_cl_team_barrier();
-			// BarrierCounter
+			pi_cl_team_barrier();
+			BarrierCounter
 			
 			#endif
 		}
