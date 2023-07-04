@@ -1,32 +1,9 @@
 #include "pmsis.h"
-#include "stats.h" 
+#include "util.h" 
 #include "inputData/qr40X40.h"
 #include "inputData/data40X40.inc"
 #include <math.h>
 
-#define STATS 
-#define STACK_SIZE 2048
-#define MOUNT 1
-#define UNMOUNT 0
-#define CID 0
-
-
-
-// PI_L1 float Q[N_ROW][N_ROW]; 
-// PI_L1 float R[N_ROW][N_COL];
-// PI_L1 float v[N_ROW];
-// PI_L1 float sel_col[N_ROW];
-// PI_L1 float Q_temp[N_ROW][N_ROW];
-// PI_L1 float R_temp[N_ROW][N_COL];
-// PI_L1 float H[N_ROW][N_ROW];
-// PI_L1 float n;
-// PI_L1 int i2;
-// PI_L1 float zero = 0;
-// PI_L1 float one = 1;
-// PI_L1 float two = 2;
-// PI_L1 float temp;
-// PI_L1 static float buffer[NUM_CORES];
-// PI_L1 static int idx[NUM_CORES];
 
 PI_L1 float Q[N_ROW][N_ROW]; 
 PI_L1 float R[N_ROW][N_COL];
@@ -44,20 +21,16 @@ PI_L1 float temp;
 PI_L1 static float buffer[NUM_CORES];
 PI_L1 static int idx[NUM_CORES];
 
+float res[N_ROW][N_COL];
 
-int cyclesArr[NUM_CORES];
-int instrArr[NUM_CORES];
-int activeArr[NUM_CORES];
-int ldEXTArr[NUM_CORES];
-int TCDMArr[NUM_CORES];
-int ldstallArr[NUM_CORES];
-int imissArr[NUM_CORES];
+
+definePrefArr
+
 
 
 void cluster_main();
-//void qr_household(float Q[][N_ROW], float R[][N_COL]);
 void qr_household(float Q[][N_ROW], float R[][N_COL]);
-void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O);
+void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O, int core_id);
 
 void pe_entry(void *arg){cluster_main();}
 
@@ -92,19 +65,6 @@ int main(){
 
 void cluster_main(){
 
-	unsigned long cycles = 0;
-	unsigned long instr = 0;
-	unsigned long active = 0;
-	unsigned long ldext = 0;
-	unsigned long tcdmcont = 0;
-	unsigned long ldstall = 0;
-	unsigned long imiss = 0;
-	unsigned long apu_cont = 0;
-	unsigned long apu_dep = 0;
-	unsigned long apu_type = 0;
-	unsigned long apu_wb = 0;
-
-
 	pi_perf_conf(
 	(1<<PI_PERF_CYCLES) | 
 	(1<<PI_PERF_INSTR)  | 
@@ -119,22 +79,24 @@ void cluster_main(){
 	(1<<0x14));
   
 	if (pi_core_id()==0){ 
-		for(int i=0; i<N_ROW; i++){
-			for(int j=0; j<N_ROW; j++){
-				if(i == j){
-					Q[i][j]=1;
-				}else{
-					Q[i][j]=0;
-				}
-			}
-		}
+		// for(int i=0; i<N_ROW; i++){
+		// 	for(int j=0; j<N_ROW; j++){
+		// 		if(i == j){
+		// 			Q[i][j]=1;
+		// 		}else{
+		// 			Q[i][j]=0;
+		// 		}
+		// 	}
+		// }
 
 
-		for(int i=0; i<N_ROW; i++){
-			for(int j=0; j<N_COL; j++){
-				R[i][j]=input[i][j];            
-			}
-		}
+		// for(int i=0; i<N_ROW; i++){
+		// 	for(int j=0; j<N_COL; j++){
+		// 		R[i][j]=input[i][j];            
+		// 	}
+		// }
+		initialMatrixEYE(&Q[0][0],N_ROW,N_ROW);
+		initialMatrixMatrix(&R[0][0],N_ROW,N_COL,&input[0][0]);
 	}
     
 	pi_cl_team_barrier();
@@ -146,103 +108,28 @@ void cluster_main(){
 
 	pi_perf_stop();
 	
-	cycles   = pi_perf_read (PI_PERF_CYCLES);
-	instr    = pi_perf_read (PI_PERF_INSTR);
-	active   = pi_perf_read (PI_PERF_ACTIVE_CYCLES);
-	ldext    = pi_perf_read (PI_PERF_LD_EXT);
-	tcdmcont = pi_perf_read (PI_PERF_TCDM_CONT);
-	ldstall  = pi_perf_read (PI_PERF_LD_STALL);
-	imiss    = pi_perf_read (PI_PERF_IMISS);
-	
-	//apu_cont = pi_perf_read (0x12);
-	//apu_dep  = pi_perf_read (0x13);
-	//apu_type = pi_perf_read __SPRREAD (0x791);
-	//apu_wb   = pi_perf_read (0x14);
-   
-    
-	cyclesArr[pi_core_id()] = cycles/REPEAT;
-	instrArr[pi_core_id()] = instr/REPEAT;
-	activeArr[pi_core_id()] = active/REPEAT;
-	ldEXTArr[pi_core_id()] = ldext/REPEAT;
-	TCDMArr[pi_core_id()] = tcdmcont/REPEAT;
-	ldstallArr[pi_core_id()] = ldstall/REPEAT;
-	imissArr[pi_core_id()] = imiss/REPEAT;
+	printPerfCounters
 
-	if(pi_core_id() == 0){
-		long int AVGCycles = 0;
-		long int AVGInstr = 0;
-		long int AVGActive = 0;
-		long int AVGldEXT = 0;
-		long int AVGTCDM = 0;
-		long int AVGLdstall = 0;
-		long int AVGImiss = 0;
-		for (int i = 0; i < NUM_CORES; i++){
-			AVGCycles += cyclesArr[i];
-			AVGInstr += instrArr[i];
-			AVGActive += activeArr[i];
-			AVGldEXT += ldEXTArr[i];
-			AVGTCDM += TCDMArr[i];
-			AVGLdstall += ldstallArr[i];
-			AVGImiss += imissArr[i];
+	pi_cl_team_barrier();
+	#ifdef DEBUG
+ 	if(pi_core_id()==0){
+		
+		printMatrix(&Q[0][0],N_ROW,N_ROW,"Q",0);
+		printMatrix(&R[0][0],N_ROW,N_COL,"R",0);
+
+		for (int i = 0; i < N_ROW; i++) {
+			for (int j = 0; j < N_COL; j++) {
+				res[i][j] = 0;
+				for (int k = 0; k < N_ROW; k++) {
+					res[i][j] += Q[i][k] * R[k][j];
+				}
+			}
 		}
-		printf("AVGCycles = %lu\n",AVGCycles/NUM_CORES);
-		printf("AVGInstr = %lu\n",AVGInstr/NUM_CORES);
-		printf("AVGActive = %lu\n",AVGActive/NUM_CORES);
-		printf("AVGldEXT = %lu\n",AVGldEXT/NUM_CORES);
-		printf("AVGTCDM = %lu\n",AVGTCDM/NUM_CORES);
-		printf("AVGLdstall = %lu\n",AVGLdstall/NUM_CORES);
-		printf("AVGImiss = %lu\n",AVGImiss/NUM_CORES);
-
-
-		printf("%lu\t%lu\t%lu\t%lu\t%lu\t%lu\t%lu\n",AVGCycles/NUM_CORES,AVGInstr/NUM_CORES,AVGActive/NUM_CORES,AVGldEXT/NUM_CORES
-		,AVGTCDM/NUM_CORES,AVGLdstall/NUM_CORES,AVGImiss/NUM_CORES);
+		printMatrix(&res[0][0],N_ROW,N_COL,"Res",0);
 	}
 
 	pi_cl_team_barrier();
-
-	int id = pi_core_id();
-	printf("[%d] cycles = %lu\n", id, cycles/REPEAT);
-	printf("[%d] instr = %lu\n", id, instr/REPEAT);
-	printf("[%d] active cycles = %lu\n", id, active/REPEAT);
-	printf("[%d] ext load = %lu\n", id, ldext/REPEAT);
-	printf("[%d] TCDM cont = %lu\n", id, tcdmcont/REPEAT);
-	printf("[%d] ld stall = %lu\n", id, ldstall/REPEAT);
-	printf("[%d] imiss = %lu\n", id, imiss/REPEAT);
-	//printf("[%d] apu_cont = %lu\n", id, apu_cont/REPEAT);
-	//printf("[%d] apu_dep = %lu\n", id, apu_dep/REPEAT);
-	//printf("[%d] apu_type = %lu\n", id, apu_type/REPEAT);
-	//printf("[%d] apu_wb = %lu\n", id, apu_wb/REPEAT);
-    
-	pi_cl_team_barrier();
-    
-	// if(pi_core_id()==0){
-	// 	printf("\n\nQ = \n");
-	// 	for(int i=0; i<N_ROW; i++){
-	// 		for(int j=0; j<N_ROW; j++)
-	// 			printf("%.20f ", Q[i][j]);
-	// 		printf("\n");
-	// 	}
-
-	// 	printf("\n\nR = \n");
-	// 	for(int i=0; i<N_ROW; i++){
-	// 		for(int j=0; j<N_COL; j++)
-	// 			printf("%.20f ", R[i][j]);
-	// 		printf("\n");
-	// 	}
-	// 	printf("\n\nRes = \n");
-	// 	float res[N_ROW][N_COL];
-	// 	for (int i = 0; i < N_ROW; i++) {
-	// 		for (int j = 0; j < N_COL; j++) {
-	// 			res[i][j] = 0;
-	// 			for (int k = 0; k < N_ROW; k++) {
-	// 				res[i][j] += Q[i][k] * R[k][j];
-	// 			}
-	// 			printf("%.20f ", res[i][j]);
-	// 		}
-	// 		printf("\n");
-	// 	}
-	// }
-	pi_cl_team_barrier();
+	#endif
 }
 
 
@@ -254,7 +141,7 @@ inline float Sqrt(float x) {
 
 
 //float norm(float *v, int row){
-float norm(float *v, int row){
+void norm(float *v, int row,float *temp){
 	i2=0;
 	n = 0.0f;
 	int j;
@@ -281,22 +168,18 @@ float norm(float *v, int row){
 		for(j=0; j<NUM_CORES; j++){
 			n += buffer[j];
 		}
+		*temp = Sqrt(n);
 	}
 	pi_cl_team_barrier();
 	#else
 
-
-	// for(j=0; j<row;j++){
-	// 	n = n + v[i2]*v[i2];
-	// 	i2++;
-	// }
 	for(j=0; j<row;j++){
 		n = n + v[j]*v[j];
 	}
+		*temp = Sqrt(n);
 	#endif
 
-	// return Sqrt(n);
-	return sqrtf(n);
+	// return sqrtf(n);
 
 }
 
@@ -304,14 +187,13 @@ float norm(float *v, int row){
 
 #pragma GCC push_options
 #pragma GCC optimize ("-fivopts")
-void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O) {
+void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O,int core_id) {
 
 
     int i = M; // loop counter for M
     int j = N; // loop counter for N
     int k = O; // loop counter for O
 
-    int core_id = pi_core_id();
     if(M<=0 || N<=0 || O<=0) return;
 
     for (k = core_id; k < O/2; k += NUM_CORES) {
@@ -423,20 +305,16 @@ void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __res
 #pragma GCC pop_options
 
 void qr_household(float Q[][N_ROW], float R[][N_COL]){
+	int core_id = pi_core_id();
+	#if NUM_CORES > 1
+	int blockSize_ROW = N_ROW/NUM_CORES;
+	int start_ROW = core_id*blockSize_ROW;
+
+	if(core_id==(NUM_CORES - 1)){
+		blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
+	#endif
+
 	for(int i=0;i<N_COL;i++){
-		
-
-
-    	#if NUM_CORES > 1
-        int blockSize_ROW = N_ROW/NUM_CORES;
-        int start_ROW = pi_core_id()*blockSize_ROW;
-
-        if(pi_core_id()==(NUM_CORES - 1)){
-            blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
-		#endif
-
-
-
     	#if NUM_CORES > 1
 
 		for(int k = start_ROW; k < (start_ROW + blockSize_ROW); k++){
@@ -461,108 +339,64 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 			}
 		}
 
-
-		// pi_cl_team_barrier();
-		// if(pi_core_id() == 0){
-		// 	printf("H\n");
-		// 	for(int j = 0; j < N_ROW; j++){
-		// 		for(int k = 0; k < N_ROW; k++){
-		// 			// printf("%.7f\t",sel_col[j]);
-		// 			printf("%e\t",H[j][k]);
-		// 		}
-		// 		printf("\n");
-		// 	}
-		// 	printf("\n");
-		// }
-		// pi_cl_team_barrier();
-
-
-
 		#endif
 
 
     	#if NUM_CORES > 1
 
 		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-			// if(j<i){
-			// 	sel_col[j] = zero;
-			// }else{
-			// 	sel_col[j] = R[j][i];
-			// }
-			float Rji0 = R[j][i];			
 			if(j<i){
 				sel_col[j] = zero;
-			}else if((j+1) <(start_ROW + blockSize_ROW)){
-				float Rj0, Rj1;
-				Rj0 = R[j][i];
-				Rj1 = R[j+1][i];
-				sel_col[j] = Rj0;
-				sel_col[j+1] = Rj1;
-				j++;
 			}else{
-				sel_col[j] = Rji0;
+				sel_col[j] = R[j][i];
 			}
+			// float Rji0 = R[j][i];			
+			// if(j<i){
+			// 	sel_col[j] = zero;
+			// }else if((j+1) <(start_ROW + blockSize_ROW)){
+			// 	float Rj0, Rj1;
+			// 	Rj0 = R[j][i];
+			// 	Rj1 = R[j+1][i];
+			// 	sel_col[j] = Rj0;
+			// 	sel_col[j+1] = Rj1;
+			// 	j++;
+			// }else{
+			// 	sel_col[j] = Rji0;
+			// }
 		}
 		pi_cl_team_barrier();
 		#else
 
 		for(int j=0;j<N_ROW;j++){
-			// if(j<i){
-			// 	sel_col[j] = zero;
-			// }else{
-			// 	sel_col[j] = R[j][i];
-			// }
-			float Rji0 = R[j][i];
 			if(j<i){
 				sel_col[j] = zero;
-			}else if((j+1) < N_ROW){
-				float Rj0, Rj1;
-				Rj0 = R[j][i];
-				Rj1 = R[j+1][i];
-				sel_col[j] = Rj0;
-				sel_col[j+1] = Rj1;
-				j++;
 			}else{
-				sel_col[j] = Rji0;
+				sel_col[j] = R[j][i];
 			}
+			// float Rji0 = R[j][i];
+			// if(j<i){
+			// 	sel_col[j] = zero;
+			// }else if((j+1) < N_ROW){
+			// 	float Rj0, Rj1;
+			// 	Rj0 = R[j][i];
+			// 	Rj1 = R[j+1][i];
+			// 	sel_col[j] = Rj0;
+			// 	sel_col[j+1] = Rj1;
+			// 	j++;
+			// }else{
+			// 	sel_col[j] = Rji0;
+			// }
 		}
 
 		#endif
 
-		// pi_cl_team_barrier();
-		// if(pi_core_id() == 0){
-		// 	printf("sel_col\n");
-		// 	for(int j = 0; j < N_ROW; j++){
-		// 		printf("%.10f\t",sel_col[j]);
-		// 		// printf("%e\t",sel_col[j]);
-		// 	}
-		// 	printf("\n");
-		// }
 		pi_cl_team_barrier();
-
-		temp = norm(&sel_col[0],N_ROW);
-
+		
+		norm(&sel_col[0],N_ROW, &temp);
+		
 		pi_cl_team_barrier();
-		// if(pi_core_id() == 0){
-		// 	printf("norm = %.10f\n",temp);
-		// 	// printf("norm = %e\n",temp);
-		// }
-		// pi_cl_team_barrier();
-
 
     	#if NUM_CORES > 1
-
-		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-		// 	if(j == i){
-		// 		if(sel_col[j] >= 0){
-		// 			v[j] = sel_col[j] + temp;
-		// 		}else{
-		// 			v[j] = sel_col[j] - temp;
-		// 		}
-		// 	}else{
-		// 		v[j] = sel_col[j];
-		// 	}
-		// }
 
 		float sel_coli;
 		if(i < N_ROW){
@@ -575,40 +409,14 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 				}else{
 					v[j] = sel_coli - temp;
 				}
-			// }else if((j+1) == i){
-			// 	float sel_col0;
-			// 	sel_col0 = sel_col[j];
-			// 	v[j] = sel_col0;
-			}else if(j+1 < (start_ROW + blockSize_ROW)){
-				float sel_col0, sel_col1;
-				sel_col0 = sel_col[j];
-				sel_col1 = sel_col[j+1];
-				v[j] = sel_col0;
-				v[j+1] = sel_col1;
-				j++;
 			}else{
-				float sel_col0;
-				sel_col0 = sel_col[j];
-				v[j] = sel_col0;				
+				v[j] = sel_col[j];
 			}
 		}
 
 		pi_cl_team_barrier();
 
 		#else
-
-		// for(int j=0;j<N_ROW;j++){
-		// 	if(j == i){
-		// 		if(sel_col[j] >= 0){
-		// 			v[j] = sel_col[j] + temp;
-		// 		}else{
-		// 			v[j] = sel_col[j] - temp;
-		// 		}
-		// 	}else{
-		// 		v[j] = sel_col[j];
-		// 	}
-		// }
-
 
 		float sel_coli;
 		if(i < N_ROW){
@@ -621,56 +429,33 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 				}else{
 					v[j] = sel_coli - temp;
 				}
-			}else if(j+1 < N_ROW){
-				float sel_col0, sel_col1;
-				sel_col0 = sel_col[j];
-				sel_col1 = sel_col[j+1];
-				v[j] = sel_col0;
-				v[j+1] = sel_col1;
-				j++;
-			}
-			else{
-				float sel_col0;
-				sel_col0 = sel_col[j];
-				v[j] = sel_col0;
+			}else{
+				v[j] = sel_col[j];
 			}
 		}
 
 
 		#endif
 
-		// pi_cl_team_barrier();
-		// if(pi_core_id() == 0){
-		// 	printf("v\n");
-		// 	for(int j = 0; j < N_ROW; j++){
-		// 		printf("%.20f\t",v[j]);
-		// 		// printf("%e\t",v[j]);
-		// 	}
-		// 	printf("\n");
-		// }
-		// pi_cl_team_barrier();
-
-
-
 		pi_cl_team_barrier();
-
-		temp = zero;
-
+		if(core_id == 0){
+			temp = zero;
+		}
 		pi_cl_team_barrier();
 
     	#if NUM_CORES > 1
-        buffer[pi_core_id()]=0;
-        idx[pi_core_id()]=0;
+        buffer[core_id]=0;
+        idx[core_id]=0;
 
 
 		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
 
-			buffer[pi_core_id()] = buffer[pi_core_id()] + v[idx[pi_core_id()]+start_ROW]*v[idx[pi_core_id()]+start_ROW];
-			idx[pi_core_id()] = idx[pi_core_id()] + 1;
+			buffer[core_id] = buffer[core_id] + v[idx[core_id]+start_ROW]*v[idx[core_id]+start_ROW];
+			idx[core_id] = idx[core_id] + 1;
 		}
 
 		pi_cl_team_barrier();
-        if(pi_core_id()==0){
+        if(core_id==0){
             for(int j=0; j<NUM_CORES; j++){
                 temp += buffer[j];
             }
@@ -678,10 +463,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 		pi_cl_team_barrier();
 
 		#else
-
-		// for (int j = 0; j < N_ROW; j++){
-		// 	temp = temp + v[j]*v[j];
-		// }
 
 		for(int j=0; (j+1)<N_ROW; j+=2){
 			float vj0 = v[j];float vj1 = v[j+1];
@@ -699,22 +480,7 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 
 		#endif
 
-		// pi_cl_team_barrier();
-		// if(pi_core_id() == 0){
-		// 	printf("temp = %.10f\n",temp);
-		// 	// printf("temp = %e\n",temp);
-		// }
-		// pi_cl_team_barrier();
-
     	#if NUM_CORES > 1
-
-		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-		// 	if(j >= i){
-		// 		for(int k = i; k < N_ROW; k++){
-		// 			H[j][k] = H[j][k] - two*v[k]*v[j]/temp;
-		// 		}
-		// 	}
-		// }
 
 		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
 			int k;
@@ -722,15 +488,12 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 			float vjx2 = vj*two;
 			if(j >= i){
 				for(k = i; k+1 < N_ROW; k+=2){
-					// printf("id = %d\tstart_ROW = %d\tblockSize_ROW = %d\ti = %d\t j = %d\t k = %d\n",pi_core_id(),start_ROW,blockSize_ROW,i,j,k);	
 					float Hjk0 ,Hjk1;
 					float vk0 ,vk1;
 					vk0 = v[k];
 					Hjk0 = H[j][k];
 					vk1 = v[k+1];
 					Hjk1 = H[j][k+1];
-					// H[j][k] = Hjk0 - vk0*vjx2;
-					// H[j][k+1] = Hjk1 - vk1*vjx2;
 					H[j][k] = Hjk0 - vk0*vjx2/temp;
 					H[j][k+1] = Hjk1 - vk1*vjx2/temp;
 				}
@@ -746,12 +509,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 		pi_cl_team_barrier();
 		#else
 
-		// for (int j = i; j < N_ROW; j++){
-		// 	for(int k = i; k < N_ROW; k++){
-		// 		H[j][k] = H[j][k] - (two*v[k]*v[j])/temp;
-		// 	}
-		// }
-
 		for (int j = i; j < N_ROW; j++){
 			int k;
 			float vj = v[j];
@@ -765,9 +522,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 				Hjk1 = H[j][k+1];
 				H[j][k] = Hjk0 - vk0*vjx2/temp;
 				H[j][k+1] = Hjk1 - vk1*vjx2/temp;
-				// if(k == 0){
-				// 	printf("K is 0\n");
-				// }
 				
 			}
 			if(k < N_ROW){
@@ -776,9 +530,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 				vk0 = v[k];
 				Hjk0 = H[j][k];
 				H[j][k] = Hjk0 - vk0*vjx2/temp;
-				// if(k == 0){
-				// 	printf("K is 0\n");
-				// }
 			}
 		}
 
@@ -786,22 +537,10 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 
 		#endif
 
-		// pi_cl_team_barrier();
-		// if(pi_core_id() == 0){
-		// 	printf("H\n");
-		// 	for(int j = 0; j < N_ROW; j++){
-		// 		for(int k = 0; k < N_ROW; k++){
-		// 			printf("%.10f\t",H[j][k]);
-		// 			// printf("%e\t",H[j][k]);
-		// 		}
-		// 		printf("\n");
-		// 	}
-		// 	printf("\n");
-		// }
 		pi_cl_team_barrier();
 
-		matMul(&H[0][0],&R[0][0],&R_temp[0][0],N_ROW,N_ROW,N_COL);
-		matMul(&Q[0][0],&H[0][0],&Q_temp[0][0],N_ROW,N_ROW,N_ROW);
+		matMul(&H[0][0],&R[0][0],&R_temp[0][0],N_ROW,N_ROW,N_COL,core_id);
+		matMul(&Q[0][0],&H[0][0],&Q_temp[0][0],N_ROW,N_ROW,N_ROW,core_id);
 
 		pi_cl_team_barrier();
 
@@ -836,12 +575,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 
 		#if NUM_CORES > 1
 
-		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-		// 	for(int k = 0; k < N_COL; k++){
-		// 		R[j][k] = R_temp[j][k];
-		// 	}
-		// }
-
 		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
 			int k;
 			for(k = 0; k+1 < N_COL; k+=2){
@@ -858,12 +591,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 		}
 
 		#else
-
-		// for(int j = 0;j < N_ROW; j++){//??????
-		// 	for(int k = 0; k < N_COL; k++){
-		// 		R[j][k] = R_temp[j][k];
-		// 	}
-		// }
 
 		for(int j = 0;j < N_ROW; j++){//??????
 			int k;
@@ -884,12 +611,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 		
 		#if NUM_CORES > 1
 
-		// for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-		// 	for(k = 0; k < N_ROW; k++){
-		// 		Q[j][k] = Q_temp[j][k];
-		// 	}
-		// }
-
 		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
 			int k;
 			for(k = 0; (k+1) < N_ROW; k+=2){
@@ -909,13 +630,6 @@ void qr_household(float Q[][N_ROW], float R[][N_COL]){
 		pi_cl_team_barrier();
 
 		#else
-
-		// for(int j = 0;j < N_ROW; j++){//??????
-		// 	for(k = 0; k < N_ROW; k++){
-		// 		Q[j][k] = Q_temp[j][k];
-		// 	}
-		// }
-
 
 		for(int j = 0;j < N_ROW; j++){//??????
 			int k;

@@ -1,26 +1,8 @@
 #include "pmsis.h"
-// #include "stats.h" 
+#include "util.h" 
 #include "inputData/qr40X40.h"
 #include "inputData/data40X40.inc"
 #include <math.h>
-
-#define STATS 
-#define STACK_SIZE 1024
-#define MOUNT 1
-#define UNMOUNT 0
-#define CID 0
-#define DEBUG
-
-#define BarrierCounter //if(pi_core_id() == 0){numBarr++;};
-#define definePrefArr 							\
-int cyclesArr [NUM_CORES];						\
-int instrArr  [NUM_CORES];						\
-int activeArr [NUM_CORES];						\
-int ldEXTArr  [NUM_CORES];						\
-int TCDMArr   [NUM_CORES];						\
-int ldstallArr[NUM_CORES];						\
-int imissArr  [NUM_CORES];						\
-
 
 //Q is transposed
 PI_L1 float Q[N_ROW][N_ROW]; 
@@ -30,88 +12,13 @@ PI_L1 static float buffer[NUM_CORES];
 PI_L1 float rk=0.0;
 PI_L1 static float temp[NUM_CORES];
 PI_L1 static float one = 1.0;
-PI_L1 static int k_bank;
 
 float res[N_ROW][N_COL];
 
 definePrefArr
 
-
-#define printPerfCounters										\
-						  										\
-long int AVGCycles = 0;   										\
-long int AVGInstr  = 0;   										\
-long int AVGActive = 0;   										\
-long int AVGldEXT  = 0;   										\
-long int AVGTCDM   = 0;   										\
-long int AVGLdstall= 0;   										\
-long int AVGImiss  = 0;   										\
-																\
-unsigned long cycles   = pi_perf_read (PI_PERF_CYCLES);		 	\
-unsigned long instr    = pi_perf_read (PI_PERF_INSTR);		 	\
-unsigned long active   = pi_perf_read (PI_PERF_ACTIVE_CYCLES);	\
-unsigned long ldext    = pi_perf_read (PI_PERF_LD_EXT);		 	\
-unsigned long tcdmcont = pi_perf_read (PI_PERF_TCDM_CONT);		\
-unsigned long ldstall  = pi_perf_read (PI_PERF_LD_STALL);		\
-unsigned long imiss    = pi_perf_read (PI_PERF_IMISS);		 	\
-																\
-cyclesArr [pi_core_id()] = cycles;								\
-instrArr  [pi_core_id()] = instr;								\
-activeArr [pi_core_id()] = active;								\
-ldEXTArr  [pi_core_id()] = ldext;								\
-TCDMArr   [pi_core_id()] = tcdmcont;							\
-ldstallArr[pi_core_id()] = ldstall;								\
-imissArr  [pi_core_id()] = imiss;								\
-																\
-if(pi_core_id() == 0){											\
-	for (int i = 0; i < NUM_CORES; i++){						\
-		AVGCycles  += cyclesArr [i];							\
-		AVGInstr   += instrArr  [i];							\
-		AVGActive  += activeArr [i];							\
-		AVGldEXT   += ldEXTArr  [i];							\
-		AVGTCDM    += TCDMArr   [i];							\
-		AVGLdstall += ldstallArr[i];							\
-		AVGImiss   += imissArr  [i];							\
-	}															\
-	printf("%lu\t%lu\t%lu\t%lu\t%lu\t%lu\t%lu\n",				\
-	AVGCycles/NUM_CORES,AVGInstr/NUM_CORES,		 				\
-	AVGActive/NUM_CORES,AVGldEXT/NUM_CORES,		 				\
-	AVGTCDM/NUM_CORES,AVGLdstall/NUM_CORES,		 				\
-	AVGImiss/NUM_CORES);				 		 				\
-}		 										 				\
-
-
-
-
 void cluster_main();
 void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]);
-void initialMatrixMatrix(float *inp,int rowSize,int colSize,float *initMatrix){
-	for (int i = 0; i < rowSize; i++){
-		for (int j = 0; j < colSize; j++){
-			inp[i*rowSize+j] = initMatrix[i*rowSize+j];
-		}
-	}
-}
-void initialMatrixConst (float *inp,int rowSize,int colSize,float initValue){
-	for (int i = 0; i < rowSize; i++){
-		for (int j = 0; j < colSize; j++){
-			inp[i*colSize+j] = initValue;
-		}
-	}
-}
-void printMatrix(float *inp,int rowSize,int colSize,const char name[], int transposed){
-	printf("\n\n%s = \n",name);
-	for (int i = 0; i < rowSize; i++){
-		for (int j = 0; j < colSize; j++){
-			if(transposed){
-				printf("%.20f ",inp[j*rowSize+i]);
-			}else{
-				printf("%.20f ",inp[i*colSize+j]);
-			}
-		}    
-		printf("\n");
-	}
-}
 
 void pe_entry(void *arg){
 	cluster_main();}
@@ -206,9 +113,6 @@ void cluster_main(){
 		printMatrix(&res[0][0],N_ROW,N_COL,"Res",0);
 	}
 
-	// printf("temp = %.20f\n",temp);
-
-
 	pi_cl_team_barrier();
 	#endif
 }
@@ -225,49 +129,68 @@ __attribute__ ((noinline))
 void  norm(float *v, int row, int column, int k, int blockSize_ROW, int start_ROW) { 
 	int i2 = 0;
 	float n = 0.0f;
-	// int j;
 	int j, idx;
 
-	#if NUM_CORES > 1
-	int core_id = pi_core_id();
+	// #if NUM_CORES > 1
+	// int core_id = pi_core_id();
 
-	int start_matrice = start_ROW;
+	// int start_matrice = start_ROW;
 
-	buffer[core_id]=0;
-	idx=0;
+	// buffer[core_id]=0;
+	// idx=0;
 	
-	for(j = start_ROW; (j+1)<start_ROW + (blockSize_ROW); j+=2){//???????? unroll x3
-		float t0 = v[idx+start_matrice];
-		float t1 = v[idx+1+start_matrice];
-		asm volatile ("":::"memory");
-		buffer[core_id] = buffer[core_id] + t0*t0;
-		buffer[core_id] = buffer[core_id] + t1*t1;
-		// float temp = t0*t0+t1*t1;
-		// buffer[core_id] = temp + buffer[core_id];
-		idx+=2;
-		asm volatile ("":::"memory");
+	// for(j = start_ROW; (j+1)<start_ROW + (blockSize_ROW); j+=2){//???????? unroll x3
+	// 	float t0 = v[idx+start_matrice];
+	// 	float t1 = v[idx+1+start_matrice];
+	// 	// asm volatile ("":::"memory");
+	// 	buffer[core_id] = buffer[core_id] + t0*t0;
+	// 	buffer[core_id] = buffer[core_id] + t1*t1;
+	// 	// float temp = t0*t0+t1*t1;
+	// 	// buffer[core_id] = temp + buffer[core_id];
+	// 	idx+=2;
+	// 	// asm volatile ("":::"memory");
 
-	}
+	// }
 
-	if(j < start_ROW + blockSize_ROW){
-		buffer[core_id] = buffer[core_id] + v[idx+start_matrice]*v[idx+start_matrice];
-	}
+	// if(j < start_ROW + blockSize_ROW){
+	// 	buffer[core_id] = buffer[core_id] + v[idx+start_matrice]*v[idx+start_matrice];
+	// }
 
-	pi_cl_team_barrier();
-	BarrierCounter
+	// pi_cl_team_barrier();
+	// BarrierCounter
 	
-	if(core_id==0)
-	{
-		for(j=0; j<NUM_CORES; j++){
-			n += buffer[j];
-		}
-		R[k][k] = Sqrt(n);
-		rk = 1/R[k][k];
-	}
-	pi_cl_team_barrier();
-	BarrierCounter
+	// if(core_id==0)
+	// {
+	// 	for(j=0; j<NUM_CORES; j++){
+	// 		n += buffer[j];
+	// 	}
+	// 	R[k][k] = Sqrt(n);
+	// 	rk = 1/R[k][k];
+	// }
+	// pi_cl_team_barrier();
+	// BarrierCounter
 
-	#else
+	// #else
+
+	// for(j=0; (j+1)<column; j+=2){
+	// 	float t0 = v[i2];float t1 = v[i2+1];
+	// 	float temp = t0*t0;
+	// 	temp = temp + t1*t1;
+	// 	n = n + temp;
+	// 	i2+=2*1;
+	// }
+		
+	// if(j<column){
+	// 	float t0 = v[i2];
+	// 	float temp = t0*t0;
+	// 	n = n + temp;
+	// 	i2+=1*1;
+	// }
+
+	// R[k][k] = Sqrt(n);
+    // rk = 1/R[k][k];
+
+	// #endif
 
 	for(j=0; (j+1)<column; j+=2){
 		float t0 = v[i2];float t1 = v[i2+1];
@@ -285,10 +208,7 @@ void  norm(float *v, int row, int column, int k, int blockSize_ROW, int start_RO
 	}
 
 	R[k][k] = Sqrt(n);
-    rk = 1/R[k][k];
-
-	#endif
-	
+	rk = 1/R[k][k];	
 }
 
 void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
@@ -303,15 +223,6 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 	if(core_id==(NUM_CORES - 1)){
 		blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
 	int end_ROW = start_ROW + blockSize_ROW;
-
-	// int blockSize_COL = N_COL/NUM_CORES;
-	// int start_COL = core_id*blockSize_COL;
-	// if(core_id==(NUM_CORES - 1)){
-	// 	blockSize_COL = N_COL - (NUM_CORES - 1)* blockSize_COL;
-	// }
-	// int end_COL = start_COL + blockSize_COL;
-
-	// printf("id = %d\tstart_ROW = %d\tblockSize_ROW = %d\n",core_id,start_ROW,blockSize_ROW);
 
 
 	#endif
@@ -346,13 +257,12 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 		
 		#endif
 
-		// pi_perf_reset();
-		// pi_perf_start();
 		for(int i=0; i<k; i++){
+
+			// printf("k = %d \t i = %d\n",k,i);
+
 			#if NUM_CORES > 1
 			temp[core_id]=0;
-			// temp[core_id]=R[i][k];
-			// printf("R[i][k] = %f\n",R[i][k]);
 			for(j = start_ROW; ((j+1)<end_ROW); j+=2){//unroll x3
 				float ji0 = Q[i][j];float jk0 = Q[k][j];
 				float ji1 = Q[i][j+1];float jk1 = Q[k][j+1];
@@ -362,37 +272,27 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 				float ji0 = Q[i][j];float jk0 = Q[k][j];
 				temp[core_id] = temp[core_id] + (ji0 * jk0);
 			}
-			// pi_cl_team_barrier();
-			// BarrierCounter
-			
-			// if(core_id==0){
-			// 	for(j=0; j<NUM_CORES; j++){
-			// 		R[i][k]+=temp[j];
-			// 	}
-			// 	// printf("id = %d\t RTEMP = %f\n",core_id,R[i][k]);
-			// }
-				
-			// pi_cl_team_barrier();
-			// BarrierCounter
-
-
-			// RTEMP = R[i][k];
 
 			pi_cl_team_barrier();
 			BarrierCounter
 			
-			// if(core_id==0)
-			RTEMP = 0;
-			for(j=0; j<NUM_CORES; j++){
+			// switch(core_id){
+			// 	case 0:	RTEMP = temp[0]+temp[1]+temp[2]+temp[3]+temp[4]+temp[5]+temp[6]+temp[7];break;
+			// 	case 1:	RTEMP = temp[1]+temp[2]+temp[3]+temp[4]+temp[5]+temp[6]+temp[7]+temp[0];break;
+			// 	case 2:	RTEMP = temp[2]+temp[3]+temp[4]+temp[5]+temp[6]+temp[7]+temp[0]+temp[1];break;
+			// 	case 3:	RTEMP = temp[3]+temp[4]+temp[5]+temp[6]+temp[7]+temp[0]+temp[1]+temp[2];break;
+			// 	case 4:	RTEMP = temp[4]+temp[5]+temp[6]+temp[7]+temp[0]+temp[1]+temp[2]+temp[3];break;
+			// 	case 5:	RTEMP = temp[5]+temp[6]+temp[7]+temp[0]+temp[1]+temp[2]+temp[3]+temp[4];break;
+			// 	case 6:	RTEMP = temp[6]+temp[7]+temp[0]+temp[1]+temp[2]+temp[3]+temp[4]+temp[5];break;
+			// 	case 7:	RTEMP = temp[7]+temp[0]+temp[1]+temp[2]+temp[3]+temp[4]+temp[5]+temp[6];break;
+			// }
+
+			RTEMP = temp[0]+temp[1];
+			for(j=2; j<NUM_CORES; j++){
 				RTEMP+=temp[j];
 			}
-			// if(core_id == 0)
-			// 	printf("id = %d\t RTEMP = %f\n",core_id,RTEMP);
-			// printf("id = %d\t RTEMP = %f\n",core_id,RTEMP);
 
 			R[i][k] = RTEMP;
-			// pi_cl_team_barrier();
-			// BarrierCounter
 
 
 
@@ -414,24 +314,19 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 
 			#if NUM_CORES > 1
 			for(j = start_ROW; (j+1<end_ROW); j+=2){
-				float Rik = R[i][k];
+				// float Rik = R[i][k];
+				float Rik = RTEMP;
 				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
 				float Qji1 = Q[i][j+1];float Qjk1 = Q[k][j+1];
-				
-				//hal_compiler_barrier();
-                		
+				                		
 				Q[k][j] = Qjk0 - Rik*Qji0;
                 Q[k][j+1] = Qjk1 - Rik*Qji1;
-				// Q[k][j] = Qjk0 - RTEMP*Qji0;
-                // Q[k][j+1] = Qjk1 - RTEMP*Qji1;
-
-
             }
 			if(j<end_ROW){
-				float Rik = R[i][k];
+				// float Rik = R[i][k];
+				float Rik = RTEMP;
 				float Qji0 = Q[i][j];float Qjk0 = Q[k][j];
 				Q[k][j] = Qjk0 - Rik*Qji0;
-				// Q[k][j] = Qjk0 - RTEMP*Qji0;
 			}
 			#else
 			for(j=0; j+1<N_ROW; j+=2){
@@ -456,12 +351,30 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 			#endif
 		}
 
+	// pi_perf_reset();
+	// pi_perf_start();
+
 		#if NUM_CORES > 1
-		
-		norm(&Q[k][0],N_ROW,N_ROW,k, blockSize_ROW, start_ROW);
+		norm(&Q[k][0], N_ROW, N_ROW, k, blockSize_ROW, start_ROW);
+		// if(core_id == 0){
+		// 	norm(&Q[k][0],N_ROW,N_ROW,k, 0, 0);
+		// }
+		// pi_cl_team_barrier();
+		// BarrierCounter
 		#else
 		norm(&Q[k][0],N_ROW,N_ROW,k, 0, 0);
 		#endif
+
+	// pi_perf_stop();
+	
+	// printPerfCounters
+
+
+
+		// #if NUM_CORES > 1
+		// 	pi_cl_team_barrier();
+		// 	BarrierCounter
+		// #endif
 
 		#if NUM_CORES > 1
 		for( j = start_ROW; (j+1)<start_ROW + (blockSize_ROW & 0xFFFFFFFE); j+=2){
@@ -487,11 +400,23 @@ void qr_gramSmidt(float Q[][N_ROW], float R[][N_COL], float input[][N_ROW]){
 		#if NUM_CORES > 1 
 		if(blockSize_ROW & 0x0001){
 			Q[k][j] = Q[k][j]*rk;}
-		pi_cl_team_barrier();
-		BarrierCounter
+		
+		// if(core_id == 0){
+		// 	if(k == N_COL-1){
+		// 		R[N_COL-2][N_COL-1] = RTEMP;
+		// 	}
+		// }
+		
+		// pi_cl_team_barrier();
+		// BarrierCounter
+
+
+
+
+
+
 		#endif
 		
 	}
 	return;
 }
-

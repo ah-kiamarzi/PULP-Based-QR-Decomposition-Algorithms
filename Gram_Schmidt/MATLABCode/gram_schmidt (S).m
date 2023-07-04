@@ -122,9 +122,9 @@ end
 fclose(fileID)
 
 %%
-row_size = size(A,1);
-column_size = size(A,2);
 
+row_size = size(A,1);  
+column_size = size(A,2);
 
 Q = single(zeros(row_size));
 R = single(zeros([row_size column_size]));
@@ -141,26 +141,12 @@ for k = 1 : 1 : column_size
         for j = 1:1:row_size
             Q(j,k) = Q(j,k) - (R(i,k)*Q(j,i));
         end
+
     end
 
-    
-#    printf("R = ");
-#    printf("%.20f\t",R);
-#    printf("\n\n");
-
-
-#    printf("Q = ");
-#    printf("%.20f\t",Q);
-#    printf("\n\n");
-
     R(k,k) = norm(Q(:,k),row_size);
-
-#    printf("R(k,k) = ");
-#    printf("%.20f\t",R(k,k));
-#    printf("\n\n");
-
     rk = 1/R(k,k);
-    
+    rk
     for j = 1:1:row_size
         Q(j,k) = Q(j,k) * rk;
     end

@@ -78,8 +78,7 @@ A40X40 = [
 
 
 A = A5X10;
-
-%A = A';
+A = A';
 
 size(A)
 
@@ -121,11 +120,9 @@ end
 fclose(fileID)
 
 %%
-EV_WINDOWS_SIZE = size(A,2);
-N_CHANNELS = size(A,1);
 
-row_size = N_CHANNELS;  
-column_size = EV_WINDOWS_SIZE;
+row_size = size(A,1);  
+column_size = size(A,2);
 
 Q = zeros(row_size);
 R = zeros([row_size column_size]);
@@ -147,7 +144,7 @@ for k = 1 : 1 : column_size
 
     R(k,k) = norm(Q(:,k),row_size);
     rk = 1/R(k,k);
-    
+    rk
     for j = 1:1:row_size
         Q(j,k) = Q(j,k) * rk;
     end
