@@ -1,25 +1,33 @@
 #include "pmsis.h"
 #include "util.h" 
-#include "inputData/qr40X40.h"
-#include "inputData/data40X40.inc"
+#include "inputData/T/qr40X40.h"
+#include "inputData/T/data40X40.inc"
+// #include "inputData/qr3X3.h"
+// #include "inputData/data3X3.inc"
+
 #include <math.h>
 
-
+//Q should be reversed
 PI_L1 float Q[N_ROW][N_ROW]; 
-PI_L1 float R[N_ROW][N_COL];
-PI_L1 float v[N_ROW];
-PI_L1 float sel_col[N_ROW];
 PI_L1 float Q_temp[N_ROW][N_ROW];
-PI_L1 float R_temp[N_ROW][N_COL];
-PI_L1 float H[N_ROW][N_ROW];
-PI_L1 float n;
-PI_L1 int i2;
+
+//R should be reversed => 
+PI_L1 float R[N_COL][N_ROW];
+PI_L1 float R_temp[N_COL][N_ROW];
+
+
+
+
+PI_L1 float v[N_ROW];
+PI_L1 float b[N_COL];
+PI_L1 float v_temp[N_ROW][N_ROW];
+
+
+
 PI_L1 float zero = 0;
 PI_L1 float one = 1;
 PI_L1 float two = 2;
-PI_L1 float temp;
-PI_L1 static float buffer[NUM_CORES];
-PI_L1 static int idx[NUM_CORES];
+
 
 float res[N_ROW][N_COL];
 
@@ -29,7 +37,7 @@ definePrefArr
 
 
 void cluster_main();
-void qr_household(float Q[][N_ROW], float R[][N_COL]);
+void qr_household(float Q[][N_ROW], float R[][N_ROW]);
 void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O, int core_id);
 
 void pe_entry(void *arg){cluster_main();}
@@ -79,24 +87,10 @@ void cluster_main(){
 	(1<<0x14));
   
 	if (pi_core_id()==0){ 
-		// for(int i=0; i<N_ROW; i++){
-		// 	for(int j=0; j<N_ROW; j++){
-		// 		if(i == j){
-		// 			Q[i][j]=1;
-		// 		}else{
-		// 			Q[i][j]=0;
-		// 		}
-		// 	}
-		// }
 
-
-		// for(int i=0; i<N_ROW; i++){
-		// 	for(int j=0; j<N_COL; j++){
-		// 		R[i][j]=input[i][j];            
-		// 	}
-		// }
 		initialMatrixEYE(&Q[0][0],N_ROW,N_ROW);
 		initialMatrixMatrix(&R[0][0],N_ROW,N_COL,&input[0][0]);
+		initialMatrixConst(&R_temp[0][0],N_ROW,N_COL,0);
 	}
     
 	pi_cl_team_barrier();
@@ -114,14 +108,14 @@ void cluster_main(){
 	#ifdef DEBUG
  	if(pi_core_id()==0){
 		
-		printMatrix(&Q[0][0],N_ROW,N_ROW,"Q",0);
-		printMatrix(&R[0][0],N_ROW,N_COL,"R",0);
+		printMatrix(&Q[0][0],N_ROW,N_ROW,"Q",1);
+		printMatrixU(&R[0][0],N_ROW,N_COL,"R",1);
 
 		for (int i = 0; i < N_ROW; i++) {
 			for (int j = 0; j < N_COL; j++) {
 				res[i][j] = 0;
-				for (int k = 0; k < N_ROW; k++) {
-					res[i][j] += Q[i][k] * R[k][j];
+				for (int k = 0; k < j+1; k++) {
+					res[i][j] += Q[k][i] * R[j][k];
 				}
 			}
 		}
@@ -139,515 +133,582 @@ inline float Sqrt(float x) {
         return res;
 }
 
-
-//float norm(float *v, int row){
-void norm(float *v, int row,float *temp){
-	i2=0;
-	n = 0.0f;
-	int j;
-
-
-	#if NUM_CORES > 1
-	int blockSize_row = row/NUM_CORES;
-	int start_row = pi_core_id()*blockSize_row;
-
-	if(pi_core_id()==(NUM_CORES - 1)){
-		blockSize_row = row - (NUM_CORES - 1)* blockSize_row;}
-
-	buffer[pi_core_id()]=0;
-	idx[pi_core_id()]=0;
-	
-	for(j = start_row; (j<row) && (j<start_row + blockSize_row); j++){
-		buffer[pi_core_id()] = buffer[pi_core_id()] + v[idx[pi_core_id()]+start_row]*v[idx[pi_core_id()]+start_row];
-		idx[pi_core_id()]+=1;
-	}
-		
-	pi_cl_team_barrier();
-			
-	if(pi_core_id()==0){
-		for(j=0; j<NUM_CORES; j++){
-			n += buffer[j];
+void house(float *v,float *b, float *x, int n){
+	float sigma = 0;
+	float x0 = x[0];
+	if(n == 1){
+		sigma = 0;
+	}else{
+		for (int i = 1; i < n; i++){
+			sigma = sigma + x[i]*x[i];
 		}
-		*temp = Sqrt(n);
-	}
-	pi_cl_team_barrier();
-	#else
-
-	for(j=0; j<row;j++){
-		n = n + v[j]*v[j];
-	}
-		*temp = Sqrt(n);
-	#endif
-
-	// return sqrtf(n);
-
-}
-
-
-
-#pragma GCC push_options
-#pragma GCC optimize ("-fivopts")
-void __attribute__ ((noinline)) matMul(float * __restrict__ pSrcA, float * __restrict__ pSrcB, float * __restrict__ pDstC, int M, int N, int O,int core_id) {
-
-
-    int i = M; // loop counter for M
-    int j = N; // loop counter for N
-    int k = O; // loop counter for O
-
-    if(M<=0 || N<=0 || O<=0) return;
-
-    for (k = core_id; k < O/2; k += NUM_CORES) {
-        for (i = 0; i < M/2; i++) {
-
-            float sum00 = 0;
-            float sum01 = 0;
-            float sum10 = 0;
-            float sum11 = 0;
-
-#ifdef UNROLL_INNER_LOOP
-            for (j = 0; j < N/2; j++) {
-                float AVal0 = pSrcA[i * 2 * N + (j*2)];
-                float AVal1 = pSrcA[i * 2 * N + N + (j*2)];
-                float BVal0 = pSrcB[(j*2) * O + (k * 2)];
-                float BVal1 = pSrcB[(j*2) * O + (k * 2 + 1)];
-
-                float AVal2 = pSrcA[i * 2 * N + (j*2+1)];
-                float AVal3 = pSrcA[i * 2 * N + N + (j*2+1)];
-                float BVal2 = pSrcB[(j*2+1) * O + (k * 2)];
-                float BVal3 = pSrcB[(j*2+1) * O + (k * 2 + 1)];
-
-                sum00 = sum00 + AVal0 * BVal0 + AVal2 * BVal2;
-                sum01 = sum01 + AVal0 * BVal1 + AVal2 * BVal3;
-                sum10 = sum10 + AVal1 * BVal0 + AVal3 * BVal2;
-                sum11 = sum11 + AVal1 * BVal1 + AVal3 * BVal3;	        	
-            }
-	    
-#else	   
-            for (j = 0; j < N; j++) {
-                float AVal0 = pSrcA[i * 2 * N + (j)];
-                float AVal1 = pSrcA[i * 2 * N + N + (j)];
-
-                float BVal0 = pSrcB[j * O + (k * 2)];
-                float BVal1 = pSrcB[j * O + (k * 2 + 1)];
-
-                sum00 = sum00 + (float) AVal0 * (float) BVal0;
-                sum01 = sum01 + (float) AVal0 * (float) BVal1;
-                sum10 = sum10 + (float) AVal1 * (float) BVal0;
-                sum11 = sum11 + (float) AVal1 * (float) BVal1;
-            }
-#endif	    
-
-            pDstC[(i * 2) * O + k * 2] = sum00;
-            pDstC[(i * 2) * O + k * 2 + 1] = sum01;
-	    	pDstC[(i * 2 + 1) * O + k * 2] = sum10;
-            pDstC[(i * 2 + 1) * O + k * 2 + 1] = sum11;
-        } // i 
-    } // k
-    // clean up code
-    i = i * 2;
-#ifdef UNROLL_INNER_LOOP    
-    j = j * 2;
-#endif
-    k = k * 2;
-    // check if every index is nicely finished
-	if (i == M && j == N && k >= O) {
-
-    } else {
-		if (core_id >= O/2){
-			i = 0;
-		}
-        uint32_t iEnd = i;
-        uint32_t jEnd = j;
-        uint32_t kEnd = k >= O ? O : k;
-
-        // clean up for j
-        if (jEnd != N) {
-            for (i = 0; i < iEnd; i++) {
-                for (k = 0; k < kEnd; k += NUM_CORES) {
-                    float sum = 0;
-                    for (j = jEnd; j < N; j++) {
-                        sum += sum + pSrcA[i * N + j] * pSrcB[j * O + k];
-                    }
-                    pDstC[i * O + k] += sum;
-                }
-            }
-        }
-
-        // clean up for i
-        if (iEnd != M) {
-            for (k = core_id; k < kEnd; k += NUM_CORES) {
-                for (i = iEnd; i < M; i++) {
-                    float sum = 0;
-                    for (j = 0; j < N; j++) {
-                        sum = sum + pSrcA[i * N + j] * pSrcB[j * O + k];
-                    }
-                    pDstC[i * O + k] = sum;
-                }
-            }
-        }
-
-        // clean up for k
-        for (k = kEnd; k < O; k += NUM_CORES) {	
-            for (i = 0; i < M; i++) {
-                float sum = 0;
-                for (j = 0; j < N; j++) {
-                    sum = sum + pSrcA[i * N + j] * pSrcB[j * O + k];
-                }
-                pDstC[i * O + k] = sum;
-            }
-        }
-    }
-
-    pi_cl_team_barrier(0);
-
-}
-
-#pragma GCC pop_options
-
-void qr_household(float Q[][N_ROW], float R[][N_COL]){
-	int core_id = pi_core_id();
-	#if NUM_CORES > 1
-	int blockSize_ROW = N_ROW/NUM_CORES;
-	int start_ROW = core_id*blockSize_ROW;
-
-	if(core_id==(NUM_CORES - 1)){
-		blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
-	#endif
-
-	for(int i=0;i<N_COL;i++){
-    	#if NUM_CORES > 1
-
-		for(int k = start_ROW; k < (start_ROW + blockSize_ROW); k++){
-			for(int j=0; j<N_ROW; j++){
-				if(k == j){
-					H[k][j]=one;
-				}else{
-					H[k][j]=zero;
-				}
-			}
-		}
-
-		#else
-
-		for(int k=0; k<N_ROW; k++){
-			for(int j=0; j<N_ROW; j++){
-				if(k == j){
-					H[k][j]=one;
-				}else{
-					H[k][j]=zero;
-				}
-			}
-		}
-
-		#endif
-
-
-    	#if NUM_CORES > 1
-
-		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-			if(j<i){
-				sel_col[j] = zero;
-			}else{
-				sel_col[j] = R[j][i];
-			}
-			// float Rji0 = R[j][i];			
-			// if(j<i){
-			// 	sel_col[j] = zero;
-			// }else if((j+1) <(start_ROW + blockSize_ROW)){
-			// 	float Rj0, Rj1;
-			// 	Rj0 = R[j][i];
-			// 	Rj1 = R[j+1][i];
-			// 	sel_col[j] = Rj0;
-			// 	sel_col[j+1] = Rj1;
-			// 	j++;
-			// }else{
-			// 	sel_col[j] = Rji0;
-			// }
-		}
-		pi_cl_team_barrier();
-		#else
-
-		for(int j=0;j<N_ROW;j++){
-			if(j<i){
-				sel_col[j] = zero;
-			}else{
-				sel_col[j] = R[j][i];
-			}
-			// float Rji0 = R[j][i];
-			// if(j<i){
-			// 	sel_col[j] = zero;
-			// }else if((j+1) < N_ROW){
-			// 	float Rj0, Rj1;
-			// 	Rj0 = R[j][i];
-			// 	Rj1 = R[j+1][i];
-			// 	sel_col[j] = Rj0;
-			// 	sel_col[j+1] = Rj1;
-			// 	j++;
-			// }else{
-			// 	sel_col[j] = Rji0;
-			// }
-		}
-
-		#endif
-
-		pi_cl_team_barrier();
-		
-		norm(&sel_col[0],N_ROW, &temp);
-		
-		pi_cl_team_barrier();
-
-    	#if NUM_CORES > 1
-
-		float sel_coli;
-		if(i < N_ROW){
-			sel_coli = sel_col[i];
-		}
-		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-			if(j == i){
-				if(sel_coli >= 0){
-					v[j] = sel_coli + temp;
-				}else{
-					v[j] = sel_coli - temp;
-				}
-			}else{
-				v[j] = sel_col[j];
-			}
-		}
-
-		pi_cl_team_barrier();
-
-		#else
-
-		float sel_coli;
-		if(i < N_ROW){
-			sel_coli = sel_col[i];
-		}
-		for(int j=0;j<N_ROW;j++){
-			if(j == i){
-				if(sel_coli >= 0){
-					v[j] = sel_coli + temp;
-				}else{
-					v[j] = sel_coli - temp;
-				}
-			}else{
-				v[j] = sel_col[j];
-			}
-		}
-
-
-		#endif
-
-		pi_cl_team_barrier();
-		if(core_id == 0){
-			temp = zero;
-		}
-		pi_cl_team_barrier();
-
-    	#if NUM_CORES > 1
-        buffer[core_id]=0;
-        idx[core_id]=0;
-
-
-		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-
-			buffer[core_id] = buffer[core_id] + v[idx[core_id]+start_ROW]*v[idx[core_id]+start_ROW];
-			idx[core_id] = idx[core_id] + 1;
-		}
-
-		pi_cl_team_barrier();
-        if(core_id==0){
-            for(int j=0; j<NUM_CORES; j++){
-                temp += buffer[j];
-            }
-		}
-		pi_cl_team_barrier();
-
-		#else
-
-		for(int j=0; (j+1)<N_ROW; j+=2){
-			float vj0 = v[j];float vj1 = v[j+1];
-			float sumTemp = vj0*vj0;
-			sumTemp = sumTemp + vj1*vj1;
-			temp = temp + sumTemp;
-		}
-			
-		if(N_ROW%2){
-			float t0 = v[N_ROW-1];
-			float sumTemp = t0*t0;
-			temp = temp + sumTemp;
-		}
-
-
-		#endif
-
-    	#if NUM_CORES > 1
-
-		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-			int k;
-			float vj = v[j];
-			float vjx2 = vj*two;
-			if(j >= i){
-				for(k = i; k+1 < N_ROW; k+=2){
-					float Hjk0 ,Hjk1;
-					float vk0 ,vk1;
-					vk0 = v[k];
-					Hjk0 = H[j][k];
-					vk1 = v[k+1];
-					Hjk1 = H[j][k+1];
-					H[j][k] = Hjk0 - vk0*vjx2/temp;
-					H[j][k+1] = Hjk1 - vk1*vjx2/temp;
-				}
-				if(k < N_ROW){
-					float Hjk0;
-					float vk0;
-					vk0 = v[k];
-					Hjk0 = H[j][k];
-					H[j][k] = Hjk0 - vk0*vjx2/temp;					
-				}
-			}
-		}
-		pi_cl_team_barrier();
-		#else
-
-		for (int j = i; j < N_ROW; j++){
-			int k;
-			float vj = v[j];
-			float vjx2 = vj*two;
-			for(k = i; k+1 < N_ROW; k+=2){
-				float Hjk0 ,Hjk1;
-				float vk0 ,vk1;
-				vk0 = v[k];
-				Hjk0 = H[j][k];
-				vk1 = v[k+1];
-				Hjk1 = H[j][k+1];
-				H[j][k] = Hjk0 - vk0*vjx2/temp;
-				H[j][k+1] = Hjk1 - vk1*vjx2/temp;
-				
-			}
-			if(k < N_ROW){
-				float Hjk0;
-				float vk0;
-				vk0 = v[k];
-				Hjk0 = H[j][k];
-				H[j][k] = Hjk0 - vk0*vjx2/temp;
-			}
-		}
-
-
-
-		#endif
-
-		pi_cl_team_barrier();
-
-		matMul(&H[0][0],&R[0][0],&R_temp[0][0],N_ROW,N_ROW,N_COL,core_id);
-		matMul(&Q[0][0],&H[0][0],&Q_temp[0][0],N_ROW,N_ROW,N_ROW,core_id);
-
-		pi_cl_team_barrier();
-
-		// if (pi_core_id() == 0)
-		// {
-
-		// 	for (int i1 = 0; i1 < N_ROW; i1++) {
-		// 		for (int j1 = 0; j1 < N_COL; j1++) {
-		// 			R_temp[i1][j1] = 0;
-		// 			for (int k1 = 0; k1 < N_ROW; k1++) {
-		// 				R_temp[i1][j1] += H[i1][k1] * R[k1][j1];
-		// 			}
-		// 			//printf("%f ", R_temp[i][j]);
-		// 		}
-		// 		//printf("\n");
-		// 	}
-
-
-		// 	for (int i1 = 0; i1 < N_ROW; i1++) {
-		// 		for (int j1 = 0; j1 < N_ROW; j1++) {
-		// 			Q_temp[i1][j1] = 0;
-		// 			for (int k1 = 0; k1 < N_ROW; k1++) {
-		// 				Q_temp[i1][j1] += Q[i1][k1] * H[k1][j1];
-		// 			}
-		// 			//printf("%f ", R_temp[i][j]);
-		// 		}
-		// 		//printf("\n");
-		// 	}			
+		// int i;
+		// for (i = 1; i+1 < n; i+=2){
+		// 	float x0 = x[i];
+		// 	float x1 = x[i+1];
+		// 	float x0p2 = x0*x0;
+		// 	float x1p2 = x1*x1;
+		// 	sigma = sigma + x0p2+x1p2;
 		// }
+		// if(i < n){
+		// 	float x0 = x[i];
+		// 	float x0p2 = x0*x0;
+		// 	sigma = sigma + x0p2;
+		// }
+	}
+	v[0] = one;
+	for (int i = 1; i < n; i++){
+		v[i] = x[i];
+	}
+	// int i;
+	// for (i = 1; i+1 < n; i+=2){
+	// 	float x0 = x[i];
+	// 	float x1 = x[i+1];
+	// 	v[i] = x0;
+	// 	v[i+1] = x1;
+	// }
+	// if(i < n){
+	// 	float x0 = x[i];
+	// 	v[i] = x0;
+	// }
 
+	if(sigma == 0){
+		*b = 0;
+	}else{
+		float mu = Sqrt(x0*x0 + sigma);
+		if(x0 <= 0){
+			v[0] = x0 - mu;
+		}else{
+			v[0] = -sigma/(x0+mu);
+		}
+	}
+	float v0 = v[0]; 
+	float v0p2 = v0*v0;
+	*b = two*v0p2/(sigma+v0p2);
+	v[0] = 1;
+	for (int i = 1; i < n; i++){
+		v[i] = v[i]/v0;
+	}
+}
+
+void house_opt(float *v,float *b, float *x, int n){
+	float sigma = 0;
+	float x0 = x[0];
+	if(n == 1){
+		sigma = 0;
+	}else{
+		// for (int i = 1; i < n; i++){
+		// 	sigma = sigma + x[i]*x[i];
+		// }
+		int i;
+		for (i = 1; i+1 < n; i+=2){
+			float x0 = x[i];
+			float x1 = x[i+1];
+			float x0p2 = x0*x0;
+			float x1p2 = x1*x1;
+			sigma = sigma + x0p2+x1p2;
+		}
+		if(i < n){
+			float x0 = x[i];
+			float x0p2 = x0*x0;
+			sigma = sigma + x0p2;
+		}
+	}
+	v[0] = one;
+	// for (int i = 1; i < n; i++){
+	// 	v[i] = x[i];
+	// }
+	int i;
+	for (i = 1; i+1 < n; i+=2){
+		float x0 = x[i];
+		float x1 = x[i+1];
+		v[i] = x0;
+		v[i+1] = x1;
+	}
+	if(i < n){
+		float x0 = x[i];
+		v[i] = x0;
+	}
+
+	if(sigma == 0){
+		*b = 0;
+	}else{
+		float mu = Sqrt(x0*x0 + sigma);
+		if(x0 <= 0){
+			v[0] = x0 - mu;
+		}else{
+			v[0] = -sigma/(x0+mu);
+		}
+	}
+	float v0 = v[0]; 
+	float v0p2 = v0*v0;
+	*b = two*v0p2/(sigma+v0p2);
+	v[0] = 1;
+	for (int i = 1; i < n; i++){
+		v[i] = v[i]/v0;
+	}
+	// for(int i = 0; i < n ; i++){
+	// 	printf("v[%d] = %f\n",i,v[i]);
+	// }
+	// printf("b = %f\n",*b);
+}
+
+void qr_household(float Q[][N_ROW], float R[][N_ROW]){
+	int core_id = pi_core_id();
+	int l;
+	float bj;
+	#if NUM_CORES > 1
+		int blockSize_ROW = N_ROW/NUM_CORES;
+		int start_ROW = core_id*blockSize_ROW;
+
+		if(core_id==(NUM_CORES - 1)){
+			blockSize_ROW = N_ROW - (NUM_CORES - 1)* blockSize_ROW;}
+		int end_ROW = start_ROW+blockSize_ROW;
+
+		int blockSize_COL = N_COL/NUM_CORES;
+		int start_COL = core_id*blockSize_COL;
+
+		if(core_id==(NUM_CORES - 1)){
+			blockSize_COL = N_COL - (NUM_CORES - 1)* blockSize_COL;}
+		int end_COL = start_ROW+blockSize_COL;
+		int start = 0;
+
+	#endif
+
+	for (int j = 0; j < N_COL; j++){
+		if(core_id == 0){
+			house_opt(&v[0],&b[j], &R[j][j], N_ROW-j);
+		}
+		#if NUM_CORES > 1
+			pi_cl_team_barrier();
+		#endif
+		bj = b[j];
+		#if NUM_CORES > 1
+			for (int i = start_ROW; ((i < N_ROW-j) && (i < end_ROW)); i++){
+				float vi = v[i];
+				for (int k = 0; k < N_ROW-j; k++){
+					if(i == k){
+						v_temp[i][k] =	one - bj * vi*vi;
+					}else{
+						v_temp[i][k] = -bj * vi*v[k];
+					}
+				}
+			}
+			pi_cl_team_barrier();
+		#else
+			for (int i = 0; i < N_ROW-j; i++){
+				float vi = v[i];
+				for (int k = 0; k < N_ROW-j; k++){
+					if(i == k){
+						v_temp[i][k] =	one - bj * vi*vi;
+					}else{
+						v_temp[i][k] = -bj * vi*v[k];
+					}
+				}
+			}
+		#endif
+		// if(core_id == 0){
+		// 	for (int i = 0; i < N_ROW-j; i++){
+		// 		for (int k = 0; k < N_ROW-j; k++){
+		// 			printf("v[%d][%d] = %f\t",i,k,v_temp[i][k]);
+		// 		}
+		// 		printf("\n");
+		// 	}
+		// 		printf("\n");
+		// }
+		// pi_cl_team_barrier();
+		#if NUM_CORES > 1
+			if(start_ROW >= j){
+				start = start_ROW;
+			}else if(end_ROW >= j){
+				start = j;
+			}else{
+				start = end_ROW+1;
+			}
+			for(int i = start; i < end_ROW; i++){
+				for (int k = j; k < N_COL; k++){
+					float temp = 0;
+
+					for (int l = j; l < N_ROW; l++){
+						temp += v_temp[i-j][l-j]*R[k][l];
+					}
+
+					// for (l = j; l+1 < N_ROW; l+=2){
+					// 	float v_temp_il0 = v_temp[i-j][l-j];
+					// 	float R_kl0 = R[k][l];
+					// 	float v_temp_il1 = v_temp[i-j][l+1-j];
+					// 	float R_kl1 = R[k][l+1];
+					// 	float m0 = v_temp_il0*R_kl0;
+					// 	float m1 = v_temp_il1*R_kl1;
+
+					// 	temp += m0 + m1;
+					// }
+					// if(l < N_ROW){
+					// 	float v_temp_il0 = v_temp[i-j][l-j];
+					// 	float R_kl0 = R[k][l];
+					// 	float m0 = v_temp_il0*R_kl0;
+
+					// 	temp += m0;
+						
+					// }
+					R_temp[k][i] = temp;
+				}
+			}
+			pi_cl_team_barrier();
+		#else
+			for(int i = j; i < N_ROW; i++){
+				for (int k = j; k < N_COL; k++){
+					float temp = 0;
+					// for (int l = j; l < N_ROW; l++){
+					// 	temp += v_temp[i-j][l-j]*R[k][l];
+					// }
+					
+					//reduce the number of load stalls by half but increase the number of instructions(significantly)
+					for (l = j; l+1 < N_ROW; l+=2){
+						float v_temp_il0 = v_temp[i-j][l-j];
+						float R_kl0 = R[k][l];
+						float v_temp_il1 = v_temp[i-j][l+1-j];
+						float R_kl1 = R[k][l+1];
+						float m0 = v_temp_il0*R_kl0;
+						float m1 = v_temp_il1*R_kl1;
+
+						temp += m0 + m1;
+					}
+					if(l < N_ROW){
+						float v_temp_il0 = v_temp[i-j][l-j];
+						float R_kl0 = R[k][l];
+						float m0 = v_temp_il0*R_kl0;
+
+						temp += m0;
+						
+					}
+					R_temp[k][i] = temp;
+				}
+			}
+		#endif
+		// if(core_id == 0){
+		// 	for (int i = 0; i < N_ROW; i++){
+		// 		for (int k = 0; k < N_COL; k++){
+		// 			printf("R_temp[%d][%d] = %f\t",k,i,R_temp[k][i]);
+		// 		}
+		// 		printf("\n");
+		// 	}
+		// 	printf("\n");
+		// }
 		// pi_cl_team_barrier();
 
+
 		#if NUM_CORES > 1
-
-		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-			int k;
-			for(k = 0; k+1 < N_COL; k+=2){
-				float R_temp0, R_temp1;
-				R_temp0 = R_temp[j][k];
-				R_temp1 = R_temp[j][k+1];
-				R[j][k] = R_temp0;
-				R[j][k+1] = R_temp1;
+			if(start_COL >= j){
+				start = start_COL;
+			}else if(end_COL >= j){
+				start = j;
+			}else{
+				start = end_COL+1;
 			}
-			if(k < N_COL){
-				float R_temp0 = R_temp[j][k];
-				R[j][k] = R_temp0;
-			}
-		}
 
+			for(int i = start; i < end_COL; i++){
+				// for (int k = j; k < end_ROW; k++){
+				// 	float R_temp_ik0 = R_temp[i][k];
+				// 	R[i][k] = R_temp_ik0;
+				// }
+
+				int k;
+				for (k = j; k+1 < N_ROW; k+=2){
+					float R_temp_ik0 = R_temp[i][k];
+					float R_temp_ik1 = R_temp[i][k+1];
+					R[i][k] = R_temp_ik0;
+					R[i][k+1] = R_temp_ik1;
+				}
+				if(k < N_ROW){
+					float R_temp_ik0 = R_temp[i][k];
+					R[i][k] = R_temp_ik0;
+				}
+			}
+
+			//pi_cl_team_barrier();
 		#else
+			for(int i = j; i < N_COL; i++){
+				// for (int k = j; k < N_ROW; k++){
+				// 	float R_temp_ik0 = R_temp[i][k];
+				// 	R[i][k] = R_temp_ik0;
+				// }
 
-		for(int j = 0;j < N_ROW; j++){//??????
-			int k;
-			for(k = 0; k+1 < N_COL; k+=2){
-				float R_temp0, R_temp1;
-				R_temp0 = R_temp[j][k];
-				R_temp1 = R_temp[j][k+1];
-				R[j][k] = R_temp0;
-				R[j][k+1] = R_temp1;
+				//reduce the number of load stalls by half but increase the number of instructions(slightly)
+				int k;
+				for (k = j; k+1 < N_ROW; k+=2){
+					float R_temp_ik0 = R_temp[i][k];
+					float R_temp_ik1 = R_temp[i][k+1];
+					R[i][k] = R_temp_ik0;
+					R[i][k+1] = R_temp_ik1;
+				}
+				if(k < N_ROW){
+					float R_temp_ik0 = R_temp[i][k];
+					R[i][k] = R_temp_ik0;
+				}
 			}
-			if(k < N_COL){
-				float R_temp0 = R_temp[j][k];
-				R[j][k] = R_temp0;
-			}			
-		}
-
 		#endif
-		
+		// if(core_id == 0){
+		// 	for (int i = 0; i < N_ROW; i++){
+		// 		for (int k = 0; k < N_COL; k++){
+		// 			printf("R[%d][%d] = %f\t",k,i,R[k][i]);
+		// 		}
+		// 		printf("\n");
+		// 	}
+		// 	printf("\n");
+		// }
+		// pi_cl_team_barrier();
+
+
+
+		if(j < N_ROW){
 		#if NUM_CORES > 1
-
-		for(int j = start_ROW; j < (start_ROW + blockSize_ROW); j++){
-			int k;
-			for(k = 0; (k+1) < N_ROW; k+=2){
-				float Q_temp0, Q_temp1;
-				Q_temp0 = Q_temp[j][k];
-				Q_temp1 = Q_temp[j][k+1];
-				Q[j][k] = Q_temp0;
-				Q[j][k+1] = Q_temp1;
+			if(start_ROW >= j+1){
+				start = start_ROW;
+			}else if(end_ROW >= j+1){
+				start = j+1;
+			}else{
+				start = end_ROW+1;
 			}
-			if(k < N_ROW){
-				float Q_temp0 = Q_temp[j][k];
-				Q[j][k] = Q_temp0;
-			}
-		}
-		
-		
-		pi_cl_team_barrier();
 
+			// for(int i = start; i < end_ROW; i++){
+			// 	R[j][i] = v[1+i-j-1];
+			// }
+
+			int i;
+			for(i = start; i+1 < end_ROW; i+=2){
+				float v0 = v[1+i-j-1]; 
+				float v1 = v[1+i+1-j-1]; 
+				R[j][i] = v0;
+				R[j][i+1] = v1;
+			}
+			if(i < end_ROW){
+				float v0 = v[1+i-j-1]; 
+				R[j][i] = v0;
+			}
+			pi_cl_team_barrier();
 		#else
-
-		for(int j = 0;j < N_ROW; j++){//??????
-			int k;
-			for(k = 0; (k+1) < N_ROW; k+=2){
-				float Q_temp0, Q_temp1;
-				Q_temp0 = Q_temp[j][k];
-				Q_temp1 = Q_temp[j][k+1];
-				Q[j][k] = Q_temp0;
-				Q[j][k+1] = Q_temp1;
+			// for(int i = j+1; i < N_ROW; i++){
+			// 	R[j][i] = v[1+i-j-1];
+			// }
+			int i;
+			for(i = j+1; i+1 < N_ROW; i+=2){
+				float v0 = v[1+i-j-1]; 
+				float v1 = v[1+i+1-j-1]; 
+				R[j][i] = v0;
+				R[j][i+1] = v1;
 			}
-			if(k < N_ROW){
-				float Q_temp0 = Q_temp[j][k];
-				Q[j][k] = Q_temp0;
+			if(i < N_ROW){
+				float v0 = v[1+i-j-1]; 
+				R[j][i] = v0;
 			}
+		#endif
 		}
+	}
 
+
+	for (int j = N_COL-1; j >= 0; j--){
+		v[j] = 1;
+		#if NUM_CORES > 1
+			if(start_ROW >= j+1){
+				start = start_ROW;
+			}else if(end_ROW >= j+1){
+				start = j+1;
+			}else{
+				start = end_ROW+1;
+			}
+
+			for(int i = start; i < end_ROW; i++){
+				v[i] = R[j][i];
+			}
+
+			// int i;
+			// for(i = start; i+1 < end_ROW; i+=2){
+			// 	float Rji0 = R[j][i];
+			// 	float Rji1 = R[j][i+1];
+			// 	v[i] = Rji0;
+			// 	v[i+1] = Rji1;
+			// }
+			// if(i < end_ROW){
+			// 	float Rji0 = R[j][i];
+			// 	v[i] = Rji0;
+			// }
+			//pi_cl_team_barrier();
+		#else
+			// for(int i = j+1; i < N_ROW; i++){
+			// 	v[i] = R[j][i];
+			// }
+			int i;		
+			for(i = j+1; i+1 < N_ROW; i+=2){
+				float Rji0 = R[j][i];
+				float Rji1 = R[j][i+1];
+				v[i] = Rji0;
+				v[i+1] = Rji1;
+			}
+			if(i < N_ROW){
+				float Rji0 = R[j][i];
+				v[i] = Rji0;
+			}
 		#endif
 
+
+		#if NUM_CORES > 1
+			if(start_ROW >= j){
+				start = start_ROW;
+			}else if(end_ROW >= j){
+				start = j;
+			}else{
+				start = end_ROW+1;
+			}
+
+			float bj = b[j];
+			for (int i = start; i < end_ROW; i++){
+				float vi = v[i];
+				for (int k = j; k < N_ROW; k++){
+					if(i == k){
+						v_temp[i][k] = one - bj * vi*vi;
+					}else{
+						v_temp[i][k] =   - bj * vi*v[k];
+					}
+				}
+			}
+			//pi_cl_team_barrier();
+		#else
+			// for (int i = j; i < N_ROW; i++){
+			// 	for (int k = j; k < N_ROW; k++){
+			// 		if(i == k){
+			// 			v_temp[i][k] = one - b[j] * v[i]*v[i];
+			// 		}else{
+			// 			v_temp[i][k] =   - b[j] * v[i]*v[k];
+			// 		}
+			// 	}
+			// }
+			float bj = b[j];
+			for (int i = j; i < N_ROW; i++){
+				float vi = v[i];
+				for (int k = j; k < N_ROW; k++){
+					if(i == k){
+						v_temp[i][k] = one - bj * vi*vi;
+					}else{
+						v_temp[i][k] =   - bj * vi*v[k];
+					}
+				}
+			}
+		#endif
+
+		#if NUM_CORES > 1
+			if(start_ROW >= j){
+				start = start_ROW;
+			}else if(end_ROW >= j){
+				start = j;
+			}else{
+				start = end_ROW+1;
+			}
+			for(int i = start; i < end_ROW; i++){
+				for (int k = j; k < N_ROW; k++){
+					float temp = 0;
+					for (int l = j; l < N_ROW; l++){
+						temp += v_temp[i][l]*Q[k][l];
+					}
+
+					//reduce the number of load stalls by half but increase the number of instructions(significantly)
+					// int l;
+					// for (l = j; l+1 < N_ROW; l+=2){
+					// float v_temp_il0 = v_temp[i][l];
+					// float Q_kl0 = Q[k][l];
+					// float v_temp_il1 = v_temp[i][l+1];
+					// float Q_kl1 = Q[k][l+1];
+					// float m0 = v_temp_il0*Q_kl0;
+					// float m1 = v_temp_il1*Q_kl1;
+
+					// temp += m0 + m1;
+					// }
+					// if(l < N_ROW){
+					// 	float v_temp_il0 = v_temp[i][l];
+					// 	float Q_kl0 = Q[k][l];
+					// 	float m0 = v_temp_il0*Q_kl0;
+					// 	temp += m0;	
+					// }
+
+					Q_temp[k][i] = temp;
+				}
+			}
+			pi_cl_team_barrier();
+		#else
+			for(int i = j; i < N_ROW; i++){
+				for (int k = j; k < N_ROW; k++){
+					float temp = 0;
+					// for (int l = j; l < N_ROW; l++){
+					// 	temp += v_temp[i][l]*Q[k][l];
+					// }
+
+					//reduce the number of load stalls by half but increase the number of instructions(significantly)
+					int l;
+					for (l = j; l+1 < N_ROW; l+=2){
+					float v_temp_il0 = v_temp[i][l];
+					float Q_kl0 = Q[k][l];
+					float v_temp_il1 = v_temp[i][l+1];
+					float Q_kl1 = Q[k][l+1];
+					float m0 = v_temp_il0*Q_kl0;
+					float m1 = v_temp_il1*Q_kl1;
+
+					temp += m0 + m1;
+					}
+					if(l < N_ROW){
+						float v_temp_il0 = v_temp[i][l];
+						float Q_kl0 = Q[k][l];
+						float m0 = v_temp_il0*Q_kl0;
+						temp += m0;	
+					}
+
+					Q_temp[k][i] = temp;
+				}
+			}
+		#endif
+	
+		#if NUM_CORES > 1
+			if(start_ROW >= j){
+				start = start_ROW;
+			}else if(end_ROW >= j){
+				start = j;
+			}else{
+				start = end_ROW+1;
+			}		
+			for(int i = start; i < end_ROW; i++){
+				for (int k = j; k < N_ROW; k++){
+					Q[i][k] = Q_temp[i][k];
+				}
+				// int k;
+				// for (k = j; k+1 < N_ROW; k+=2){
+				// 	float Q_temp_ik0 = Q_temp[i][k];
+				// 	float Q_temp_ik1 = Q_temp[i][k+1];
+				// 	Q[i][k] = Q_temp_ik0;
+				// 	Q[i][k+1] = Q_temp_ik1;
+				// }
+				// if(k < N_ROW){
+				// 	float Q_temp_ik0 = Q_temp[i][k];
+				// 	Q[i][k] = Q_temp_ik0;
+				// }
+			}
+			pi_cl_team_barrier();
+		#else
+			for(int i = j; i < N_ROW; i++){
+				for (int k = j; k < N_ROW; k++){
+					Q[i][k] = Q_temp[i][k];
+				}
+				// int k;
+				// for (k = j; k+1 < N_ROW; k+=2){
+				// 	float Q_temp_ik0 = Q_temp[i][k];
+				// 	float Q_temp_ik1 = Q_temp[i][k+1];
+				// 	Q[i][k] = Q_temp_ik0;
+				// 	Q[i][k+1] = Q_temp_ik1;
+				// }
+				// if(k < N_ROW){
+				// 	float Q_temp_ik0 = Q_temp[i][k];
+				// 	Q[i][k] = Q_temp_ik0;
+				// }
+			}		
+		#endif
 	}
 	return;
 }

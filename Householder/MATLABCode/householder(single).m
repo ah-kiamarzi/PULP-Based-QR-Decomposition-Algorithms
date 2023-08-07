@@ -3,6 +3,24 @@ clear;
 close all;
 format long
 
+A3X3 = [
+1 2 3
+4 5 6
+7 8 9];
+
+A10X10 = [
+1 2 3 4 5 6 7 8 9 0
+2 3 4 5 6 7 8 9 0 1
+3 4 5 6 7 8 9 0 1 2
+4 5 6 7 8 9 0 1 2 3
+5 6 7 8 9 0 1 2 3 4
+6 7 8 9 0 1 2 3 4 5
+7 8 9 0 1 2 3 4 5 6
+8 9 0 1 2 3 4 5 6 7
+9 0 1 2 3 4 5 6 7 8
+0 1 2 3 4 5 6 7 8 9];
+
+
 A5X10 = [
 1 2 3 4 5 6 7 8 9 0
 2 3 4 5 6 7 8 9 0 1
@@ -77,8 +95,7 @@ A40X40 = [
 0.151901873445730,0.470302045142280,0.022394837192320,0.931443231867832,0.247801211089086,0.193337975010130,0.351293247187756,0.564346880383486,0.377605232185784,0.495970823632871,0.388413367780048,0.095193036007914,0.146282490413298,0.229390193391472,0.330659202123291,0.349339819910341,0.174638313404751,0.083867827224903,0.577804635249924,0.366182004723010,0.914776781784544,0.390022705957525,0.607065855750349,0.518044797382304,0.049388593256597,0.899205201145078,0.677566961159073,0.198017610982236,0.172330528798610,0.825602231655298,0.640710921623786,0.166529271859748,0.086456953556289,0.153011358830361,0.100079280057096,0.668634505240361,0.409845215888081,0.361980907948754,0.099214728206565,0.271989626600874];
 
 
-A = single(A5X10);
-
+A = single(A40X40);
 A = A';
 
 size(A)
@@ -118,86 +135,60 @@ for i=1:1:size(res,1)
     end
 end
 
-fclose(fileID)
+fclose(fileID);
 
-row_size = size(A,1);
 column_size = size(A,2);
+row_size = size(A,1);
 
-Q = single(zeros(row_size));
+
 R = single(zeros([row_size column_size]));
+b = single(zeros([1 column_size]));
+v = single(zeros([row_size 1]));
 
-v = single(zeros([1 row_size]));
-sel_col = single(zeros([1 row_size]));
-
-A_local = single(A);
-
-final_H = single(eye(row_size));
-
-for i=1:1:column_size
-
-    H = single(eye(row_size));
-    
-    for j = 1:1:row_size
-        if(j < i)
-            sel_col(j) = 0;
-        else
-            sel_col(j) = A_local(j,i);
-        end
+for j = 1:1:column_size
+        
+    [v,b(j)] = house(A(j:row_size,j),row_size-j+1)
+    A(j:row_size,j:column_size) = (eye(row_size-j+1) - b(j)*v(1:row_size-j+1)*v(1:row_size-j+1)')*A(j:row_size,j:column_size)
+    if(j < row_size)
+        A(j+1:row_size,j) = v(2:row_size-j+1);
     end
-
-    norm = single(0);
-    sel_col;
-    for j=1:1:row_size
-        norm = norm + sel_col(j)*sel_col(j);
-    end
-
-    norm = sqrt(norm);
-
-    for j=1:1:row_size
-        if(j == i)
-            if(sel_col(j) >= 0)
-                v(j) = sel_col(j) + norm;
-            else
-                v(j) = sel_col(j) - norm;
-            end
-        else
-            v(j) = sel_col(j);
-        end
-    end
-    
-    temp = 0;
-    for j=1:1:row_size
-        temp = temp + v(j)*v(j);
-    end
-
-    for j=i:1:row_size
-        for k=i:1:row_size
-            H(j,k) = H(j,k) - 2*v(k)*v(j)/temp;
-            H(j,k);
-        end
-    end
-    A_local = H * A_local;
-    final_H = final_H * H;
 end
 
-res = final_H * A_local;
+v = single(zeros([row_size 1]));
+Q = single(eye(row_size));
+
+for j = column_size:-1:1
+    v(j:row_size) = [1;A(j+1:row_size,j)];
+    Q(j:row_size,j:row_size) = (eye(row_size-j+1) - b(j)*v(j:row_size)*v(j:row_size)')*Q(j:row_size,j:row_size);
+end
+
+
+%for j = 1:1:column_size
+    %v = single(zeros([row_size 1]));
+    %v(j:row_size) = [1;A(j+1:row_size,j)];
+    %Q = Q*(eye(row_size) - b(j)*v*v');
+    %Q;
+%end
+
+A = single(triu(A));
+res = Q*A;
 
 fileID = fopen('MM_Data.txt','w');
 fprintf(fileID,'Q = ');
-for i=1:1:size(final_H,1)
+for i=1:1:size(Q,1)
     fprintf(fileID,'\n');
-    for j=1:1:size(final_H,2)
-        fprintf(fileID,'%.20f ',final_H(i,j));
+    for j=1:1:size(Q,2)
+        fprintf(fileID,'%.20f ',Q(i,j));
     end
 end
 
 fprintf(fileID,'\n\n');
 
 fprintf(fileID,'R = ');
-for i=1:1:size(A_local,1)
+for i=1:1:size(A,1)
     fprintf(fileID,'\n');
-    for j=1:1:size(A_local,2)
-        fprintf(fileID,'%.20f ',A_local(i,j));
+    for j=1:1:size(A,2)
+        fprintf(fileID,'%.20f ',A(i,j));
     end
 end
 
@@ -211,7 +202,15 @@ for i=1:1:size(res,1)
     end
 end
 
-fclose(fileID)
+fclose(fileID);
+
+
+
+
+
+
+
+
 
 
 

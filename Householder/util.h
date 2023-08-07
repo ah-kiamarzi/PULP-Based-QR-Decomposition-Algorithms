@@ -68,7 +68,7 @@ if(pi_core_id() == 0){											\
 void initialMatrixMatrix(float *inp,int rowSize,int colSize,float *initMatrix){
 	for (int i = 0; i < rowSize; i++){
 		for (int j = 0; j < colSize; j++){
-			inp[i*rowSize+j] = initMatrix[i*rowSize+j];
+			inp[i*colSize+j] = initMatrix[i*colSize+j];
 		}
 	}
 }
@@ -107,3 +107,24 @@ void printMatrix(float *inp,int rowSize,int colSize,const char name[], int trans
 	}
 }
 
+void printMatrixU(float *inp,int rowSize,int colSize,const char name[], int transposed){
+	printf("\n\n%s = \n",name);
+	for (int i = 0; i < rowSize; i++){
+		for (int j = 0; j < colSize; j++){
+			if(transposed){
+				if(j < i){
+					printf("%.20f ",0);
+				}else{
+					printf("%.20f ",inp[j*rowSize+i]);
+				}
+			}else{
+				if(i < j){
+					printf("%.20f ",0);
+				}else{
+					printf("%.20f ",inp[i*colSize+j]);
+				}
+			}
+		}    
+		printf("\n");
+	}
+}
