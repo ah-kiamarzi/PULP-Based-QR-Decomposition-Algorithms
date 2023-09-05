@@ -2,8 +2,6 @@
 #include "util.h" 
 #include "inputData/T/qr40X40.h"
 #include "inputData/T/data40X40.inc"
-// #include "inputData/qr3X3.h"
-// #include "inputData/data3X3.inc"
 
 #include <math.h>
 
@@ -30,6 +28,8 @@ PI_L1 float two = 2;
 
 
 float res[N_ROW][N_COL];
+
+int numBarr = 0;
 
 
 definePrefArr
@@ -104,6 +104,10 @@ void cluster_main(){
 	
 	printPerfCounters
 
+	if(pi_core_id() == 0){
+		printf("NUMBARR = %d\n",numBarr);
+	}
+	
 	pi_cl_team_barrier();
 	#ifdef DEBUG
  	if(pi_core_id()==0){
@@ -142,36 +146,11 @@ void house(float *v,float *b, float *x, int n){
 		for (int i = 1; i < n; i++){
 			sigma = sigma + x[i]*x[i];
 		}
-		// int i;
-		// for (i = 1; i+1 < n; i+=2){
-		// 	float x0 = x[i];
-		// 	float x1 = x[i+1];
-		// 	float x0p2 = x0*x0;
-		// 	float x1p2 = x1*x1;
-		// 	sigma = sigma + x0p2+x1p2;
-		// }
-		// if(i < n){
-		// 	float x0 = x[i];
-		// 	float x0p2 = x0*x0;
-		// 	sigma = sigma + x0p2;
-		// }
 	}
 	v[0] = one;
 	for (int i = 1; i < n; i++){
 		v[i] = x[i];
 	}
-	// int i;
-	// for (i = 1; i+1 < n; i+=2){
-	// 	float x0 = x[i];
-	// 	float x1 = x[i+1];
-	// 	v[i] = x0;
-	// 	v[i+1] = x1;
-	// }
-	// if(i < n){
-	// 	float x0 = x[i];
-	// 	v[i] = x0;
-	// }
-
 	if(sigma == 0){
 		*b = 0;
 	}else{
@@ -197,9 +176,6 @@ void house_opt(float *v,float *b, float *x, int n){
 	if(n == 1){
 		sigma = 0;
 	}else{
-		// for (int i = 1; i < n; i++){
-		// 	sigma = sigma + x[i]*x[i];
-		// }
 		int i;
 		for (i = 1; i+1 < n; i+=2){
 			float x0 = x[i];
@@ -215,9 +191,6 @@ void house_opt(float *v,float *b, float *x, int n){
 		}
 	}
 	v[0] = one;
-	// for (int i = 1; i < n; i++){
-	// 	v[i] = x[i];
-	// }
 	int i;
 	for (i = 1; i+1 < n; i+=2){
 		float x0 = x[i];
@@ -247,10 +220,6 @@ void house_opt(float *v,float *b, float *x, int n){
 	for (int i = 1; i < n; i++){
 		v[i] = v[i]/v0;
 	}
-	// for(int i = 0; i < n ; i++){
-	// 	printf("v[%d] = %f\n",i,v[i]);
-	// }
-	// printf("b = %f\n",*b);
 }
 
 void qr_household(float Q[][N_ROW], float R[][N_ROW]){
@@ -281,6 +250,7 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 		}
 		#if NUM_CORES > 1
 			pi_cl_team_barrier();
+			BarrierCounter
 		#endif
 		bj = b[j];
 		#if NUM_CORES > 1
@@ -295,6 +265,7 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 				}
 			}
 			pi_cl_team_barrier();
+			BarrierCounter
 		#else
 			for (int i = 0; i < N_ROW-j; i++){
 				float vi = v[i];
@@ -307,16 +278,7 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 				}
 			}
 		#endif
-		// if(core_id == 0){
-		// 	for (int i = 0; i < N_ROW-j; i++){
-		// 		for (int k = 0; k < N_ROW-j; k++){
-		// 			printf("v[%d][%d] = %f\t",i,k,v_temp[i][k]);
-		// 		}
-		// 		printf("\n");
-		// 	}
-		// 		printf("\n");
-		// }
-		// pi_cl_team_barrier();
+
 		#if NUM_CORES > 1
 			if(start_ROW >= j){
 				start = start_ROW;
@@ -332,71 +294,22 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 					for (int l = j; l < N_ROW; l++){
 						temp += v_temp[i-j][l-j]*R[k][l];
 					}
-
-					// for (l = j; l+1 < N_ROW; l+=2){
-					// 	float v_temp_il0 = v_temp[i-j][l-j];
-					// 	float R_kl0 = R[k][l];
-					// 	float v_temp_il1 = v_temp[i-j][l+1-j];
-					// 	float R_kl1 = R[k][l+1];
-					// 	float m0 = v_temp_il0*R_kl0;
-					// 	float m1 = v_temp_il1*R_kl1;
-
-					// 	temp += m0 + m1;
-					// }
-					// if(l < N_ROW){
-					// 	float v_temp_il0 = v_temp[i-j][l-j];
-					// 	float R_kl0 = R[k][l];
-					// 	float m0 = v_temp_il0*R_kl0;
-
-					// 	temp += m0;
-						
-					// }
 					R_temp[k][i] = temp;
 				}
 			}
 			pi_cl_team_barrier();
+			BarrierCounter
 		#else
 			for(int i = j; i < N_ROW; i++){
 				for (int k = j; k < N_COL; k++){
 					float temp = 0;
-					// for (int l = j; l < N_ROW; l++){
-					// 	temp += v_temp[i-j][l-j]*R[k][l];
-					// }
-					
-					//reduce the number of load stalls by half but increase the number of instructions(significantly)
-					for (l = j; l+1 < N_ROW; l+=2){
-						float v_temp_il0 = v_temp[i-j][l-j];
-						float R_kl0 = R[k][l];
-						float v_temp_il1 = v_temp[i-j][l+1-j];
-						float R_kl1 = R[k][l+1];
-						float m0 = v_temp_il0*R_kl0;
-						float m1 = v_temp_il1*R_kl1;
-
-						temp += m0 + m1;
-					}
-					if(l < N_ROW){
-						float v_temp_il0 = v_temp[i-j][l-j];
-						float R_kl0 = R[k][l];
-						float m0 = v_temp_il0*R_kl0;
-
-						temp += m0;
-						
+					for (int l = j; l < N_ROW; l++){
+						temp += v_temp[i-j][l-j]*R[k][l];
 					}
 					R_temp[k][i] = temp;
 				}
 			}
 		#endif
-		// if(core_id == 0){
-		// 	for (int i = 0; i < N_ROW; i++){
-		// 		for (int k = 0; k < N_COL; k++){
-		// 			printf("R_temp[%d][%d] = %f\t",k,i,R_temp[k][i]);
-		// 		}
-		// 		printf("\n");
-		// 	}
-		// 	printf("\n");
-		// }
-		// pi_cl_team_barrier();
-
 
 		#if NUM_CORES > 1
 			if(start_COL >= j){
@@ -408,11 +321,6 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 			}
 
 			for(int i = start; i < end_COL; i++){
-				// for (int k = j; k < end_ROW; k++){
-				// 	float R_temp_ik0 = R_temp[i][k];
-				// 	R[i][k] = R_temp_ik0;
-				// }
-
 				int k;
 				for (k = j; k+1 < N_ROW; k+=2){
 					float R_temp_ik0 = R_temp[i][k];
@@ -426,40 +334,13 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 				}
 			}
 
-			//pi_cl_team_barrier();
 		#else
 			for(int i = j; i < N_COL; i++){
-				// for (int k = j; k < N_ROW; k++){
-				// 	float R_temp_ik0 = R_temp[i][k];
-				// 	R[i][k] = R_temp_ik0;
-				// }
-
-				//reduce the number of load stalls by half but increase the number of instructions(slightly)
-				int k;
-				for (k = j; k+1 < N_ROW; k+=2){
-					float R_temp_ik0 = R_temp[i][k];
-					float R_temp_ik1 = R_temp[i][k+1];
-					R[i][k] = R_temp_ik0;
-					R[i][k+1] = R_temp_ik1;
-				}
-				if(k < N_ROW){
-					float R_temp_ik0 = R_temp[i][k];
-					R[i][k] = R_temp_ik0;
+				for (int k = j; k < N_ROW; k++){
+					R[i][k] = R_temp[i][k];
 				}
 			}
 		#endif
-		// if(core_id == 0){
-		// 	for (int i = 0; i < N_ROW; i++){
-		// 		for (int k = 0; k < N_COL; k++){
-		// 			printf("R[%d][%d] = %f\t",k,i,R[k][i]);
-		// 		}
-		// 		printf("\n");
-		// 	}
-		// 	printf("\n");
-		// }
-		// pi_cl_team_barrier();
-
-
 
 		if(j < N_ROW){
 		#if NUM_CORES > 1
@@ -470,10 +351,6 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 			}else{
 				start = end_ROW+1;
 			}
-
-			// for(int i = start; i < end_ROW; i++){
-			// 	R[j][i] = v[1+i-j-1];
-			// }
 
 			int i;
 			for(i = start; i+1 < end_ROW; i+=2){
@@ -487,21 +364,12 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 				R[j][i] = v0;
 			}
 			pi_cl_team_barrier();
+			BarrierCounter
 		#else
-			// for(int i = j+1; i < N_ROW; i++){
-			// 	R[j][i] = v[1+i-j-1];
-			// }
-			int i;
-			for(i = j+1; i+1 < N_ROW; i+=2){
-				float v0 = v[1+i-j-1]; 
-				float v1 = v[1+i+1-j-1]; 
-				R[j][i] = v0;
-				R[j][i+1] = v1;
+			for(int i = j+1; i < N_ROW; i++){
+				R[j][i] = v[1+i-j-1];
 			}
-			if(i < N_ROW){
-				float v0 = v[1+i-j-1]; 
-				R[j][i] = v0;
-			}
+
 		#endif
 		}
 	}
@@ -521,33 +389,9 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 			for(int i = start; i < end_ROW; i++){
 				v[i] = R[j][i];
 			}
-
-			// int i;
-			// for(i = start; i+1 < end_ROW; i+=2){
-			// 	float Rji0 = R[j][i];
-			// 	float Rji1 = R[j][i+1];
-			// 	v[i] = Rji0;
-			// 	v[i+1] = Rji1;
-			// }
-			// if(i < end_ROW){
-			// 	float Rji0 = R[j][i];
-			// 	v[i] = Rji0;
-			// }
-			//pi_cl_team_barrier();
 		#else
-			// for(int i = j+1; i < N_ROW; i++){
-			// 	v[i] = R[j][i];
-			// }
-			int i;		
-			for(i = j+1; i+1 < N_ROW; i+=2){
-				float Rji0 = R[j][i];
-				float Rji1 = R[j][i+1];
-				v[i] = Rji0;
-				v[i+1] = Rji1;
-			}
-			if(i < N_ROW){
-				float Rji0 = R[j][i];
-				v[i] = Rji0;
+			for(int i = j+1; i < N_ROW; i++){
+				v[i] = R[j][i];
 			}
 		#endif
 
@@ -572,17 +416,7 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 					}
 				}
 			}
-			//pi_cl_team_barrier();
 		#else
-			// for (int i = j; i < N_ROW; i++){
-			// 	for (int k = j; k < N_ROW; k++){
-			// 		if(i == k){
-			// 			v_temp[i][k] = one - b[j] * v[i]*v[i];
-			// 		}else{
-			// 			v_temp[i][k] =   - b[j] * v[i]*v[k];
-			// 		}
-			// 	}
-			// }
 			float bj = b[j];
 			for (int i = j; i < N_ROW; i++){
 				float vi = v[i];
@@ -610,57 +444,18 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 					for (int l = j; l < N_ROW; l++){
 						temp += v_temp[i][l]*Q[k][l];
 					}
-
-					//reduce the number of load stalls by half but increase the number of instructions(significantly)
-					// int l;
-					// for (l = j; l+1 < N_ROW; l+=2){
-					// float v_temp_il0 = v_temp[i][l];
-					// float Q_kl0 = Q[k][l];
-					// float v_temp_il1 = v_temp[i][l+1];
-					// float Q_kl1 = Q[k][l+1];
-					// float m0 = v_temp_il0*Q_kl0;
-					// float m1 = v_temp_il1*Q_kl1;
-
-					// temp += m0 + m1;
-					// }
-					// if(l < N_ROW){
-					// 	float v_temp_il0 = v_temp[i][l];
-					// 	float Q_kl0 = Q[k][l];
-					// 	float m0 = v_temp_il0*Q_kl0;
-					// 	temp += m0;	
-					// }
-
 					Q_temp[k][i] = temp;
 				}
 			}
 			pi_cl_team_barrier();
+			BarrierCounter
 		#else
 			for(int i = j; i < N_ROW; i++){
 				for (int k = j; k < N_ROW; k++){
 					float temp = 0;
-					// for (int l = j; l < N_ROW; l++){
-					// 	temp += v_temp[i][l]*Q[k][l];
-					// }
-
-					//reduce the number of load stalls by half but increase the number of instructions(significantly)
-					int l;
-					for (l = j; l+1 < N_ROW; l+=2){
-					float v_temp_il0 = v_temp[i][l];
-					float Q_kl0 = Q[k][l];
-					float v_temp_il1 = v_temp[i][l+1];
-					float Q_kl1 = Q[k][l+1];
-					float m0 = v_temp_il0*Q_kl0;
-					float m1 = v_temp_il1*Q_kl1;
-
-					temp += m0 + m1;
+					for (int l = j; l < N_ROW; l++){
+						temp += v_temp[i][l]*Q[k][l];
 					}
-					if(l < N_ROW){
-						float v_temp_il0 = v_temp[i][l];
-						float Q_kl0 = Q[k][l];
-						float m0 = v_temp_il0*Q_kl0;
-						temp += m0;	
-					}
-
 					Q_temp[k][i] = temp;
 				}
 			}
@@ -678,35 +473,14 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 				for (int k = j; k < N_ROW; k++){
 					Q[i][k] = Q_temp[i][k];
 				}
-				// int k;
-				// for (k = j; k+1 < N_ROW; k+=2){
-				// 	float Q_temp_ik0 = Q_temp[i][k];
-				// 	float Q_temp_ik1 = Q_temp[i][k+1];
-				// 	Q[i][k] = Q_temp_ik0;
-				// 	Q[i][k+1] = Q_temp_ik1;
-				// }
-				// if(k < N_ROW){
-				// 	float Q_temp_ik0 = Q_temp[i][k];
-				// 	Q[i][k] = Q_temp_ik0;
-				// }
 			}
 			pi_cl_team_barrier();
+			BarrierCounter
 		#else
 			for(int i = j; i < N_ROW; i++){
 				for (int k = j; k < N_ROW; k++){
 					Q[i][k] = Q_temp[i][k];
 				}
-				// int k;
-				// for (k = j; k+1 < N_ROW; k+=2){
-				// 	float Q_temp_ik0 = Q_temp[i][k];
-				// 	float Q_temp_ik1 = Q_temp[i][k+1];
-				// 	Q[i][k] = Q_temp_ik0;
-				// 	Q[i][k+1] = Q_temp_ik1;
-				// }
-				// if(k < N_ROW){
-				// 	float Q_temp_ik0 = Q_temp[i][k];
-				// 	Q[i][k] = Q_temp_ik0;
-				// }
 			}		
 		#endif
 	}
