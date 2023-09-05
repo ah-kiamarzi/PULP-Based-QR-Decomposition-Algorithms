@@ -6,8 +6,10 @@
 
 #define MAX(a,b) ((a) > (b))? (a): (b)
 
-PI_L1 float a[MAX(N_COL,N_ROW)];
-PI_L1 float b[MAX(N_COL,N_ROW)];
+PI_L1 float aR[MAX(N_COL,N_ROW)];
+PI_L1 float bR[MAX(N_COL,N_ROW)];
+PI_L1 float aQ[MAX(N_COL,N_ROW)];
+PI_L1 float bQ[MAX(N_COL,N_ROW)];
 
 
 //Q is transposed
@@ -23,8 +25,11 @@ PI_L1 float s=0;
 PI_L1 float xi;
 PI_L1 float xj;
 
+PI_L1 int ii = 0;
 
 float res[N_ROW][N_COL];
+
+int numBarr = 0;
 
 definePrefArr
 
@@ -32,7 +37,7 @@ definePrefArr
 void cluster_main();
 
 void pe_entry(void *arg){
-    cluster_main();
+	cluster_main();
 }
 
 void cluster_entry(void *arg){
@@ -91,17 +96,53 @@ void cluster_main(){
 		initialMatrixEYE(&Q[0][0],N_ROW,N_ROW);
 		initialMatrixMatrix(&R[0][0],N_ROW,N_COL,&input[0][0]);
     }
-	
-    pi_cl_team_barrier();
-    pi_perf_reset();
-    pi_perf_start();
 
-    factorization(Q, R);
 
-    pi_perf_stop();
+	pi_cl_team_barrier();
+		
+	pi_perf_reset();
+	pi_perf_start();
 
+	factorization(Q, R);
+
+	pi_perf_stop();
 	printPerfCounters
-   
+	pi_cl_team_barrier();
+
+
+
+	// for(ii = 0; ii < 1; ii++){
+	// 	if (pi_core_id()==0){
+	// 		initialMatrixEYE(&Q[0][0],N_ROW,N_ROW);
+	// 		initialMatrixMatrix(&R[0][0],N_ROW,N_COL,&input[0][0]);
+	// 	}		
+	// 	pi_cl_team_barrier();
+	// 	if(ii == 0){
+	// 		pi_cl_team_barrier();
+				
+	// 		pi_perf_reset();
+	// 		pi_perf_start();
+
+	// 		factorization(Q, R);
+
+	// 		pi_perf_stop();
+	// 		printPerfCounters
+	// 		pi_cl_team_barrier();
+
+	// 	}else{
+	// 		pi_cl_team_barrier();
+
+	// 		factorization(Q, R);
+
+	// 		pi_cl_team_barrier();
+	// 	}
+
+	// }
+
+	if(pi_core_id() == 0){
+		printf("NUMBARR = %d\n",numBarr);
+	}
+
     pi_cl_team_barrier();
     
 	#ifdef DEBUG
@@ -165,291 +206,149 @@ void factorization(float Q[][N_ROW], float R[][N_COL]){
 
 	if(core_id==(NUM_CORES - 1)){
 		blockSize_column = N_COL - (NUM_CORES - 1) * blockSize_column;
-		blockSize_row = N_ROW * (NUM_CORES - 1) * blockSize_row;
+		blockSize_row = N_ROW - (NUM_CORES - 1) * blockSize_row;
 	}
-	
+	int end_row = start_row + blockSize_row;
+	int end_column = start_column + blockSize_column;
+	int start = 0;
+
 	#endif
 
 	for(int k=0; k<N_COL; k++){
+		#if NUM_CORES > 1
+
+		if(start_column >= k){
+			start = start_column;
+		}else if(end_column >= k){
+			start = k;
+		}else{
+			start = end_column+1;
+		}
+		#endif
+
 		for(int j=k+1; j<N_ROW; j++){ 
 
-			if(R[j][k]!=0){				
+			if(R[j][k]!=0){
 				if(core_id == 0){
 					xi=R[k][k];
 					xj=R[j][k];
 					givens_rotation(xi, xj, &c, &s);
 				}
-							
+
 				#if NUM_CORES > 1
-				if(start_column + blockSize_column >= k){
-					if(start_column < k){
-						for(i = k; (i+1<N_COL)&&(i+1<start_column + blockSize_column); i+=2){
-							float a0 = R[k][i];
-							float a1 = R[k][i+1];						
-							a[i] = a0;
-							a[i+1] = a1;
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float a0 = R[k][i];
-							a[i] = a0;
-						}
-					} else {
-						for(i = start_column; (i+1<N_COL)&&(i+1<start_column + blockSize_column); i+=2){
-							float a0 = R[k][i];
-							float a1 = R[k][i+1];						
-							a[i] = a0;
-							a[i+1] = a1;
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float a0 = R[k][i];
-							a[i] = a0;
-						}
-					}
+				for(i = start; (i<end_column); i++){
+					float Rki0 = R[k][i];
+					float Rji0 = R[j][i];
+					aR[i] = Rki0;
+					bR[i] = Rji0;
 				}
+
+				for(i = start_row;(i+1<end_row); i+=2){
+					float a0 = Q[k][i];
+					float a1 = Q[k][i+1];
+					aQ[i] = a0;
+					aQ[i+1] = a1;
+				}
+				if((i < end_row)){
+					float a0 = Q[k][i];
+					aQ[i] = a0;
+				}
+
+				for(i = start_row; (i+1<end_row); i+=2){
+					float b0 = Q[j][i];
+					float b1 = Q[j][i+1];						
+					bQ[i] = b0;
+					bQ[i+1] = b1;
+				}
+				if((i < end_row)){
+					float b0 = Q[j][i];
+					bQ[i] = b0;
+				}
+
+
+				pi_cl_team_barrier();
+				BarrierCounter
+
+				for(i = start; (i<end_column); i++){
+					float ai0 = aR[i]; 
+					float bi0 = bR[i];
+					R[k][i]     = (c * ai0) + (s * bi0);
+					R[j][i]     = (c * bi0) - (s * ai0);
+				}
+
 				#else
+
 				for(i=k; i+1<N_COL; i+=2){
-					float a0 = R[k][i];
-					float a1 = R[k][i+1];
-					a[i] = a0;
-					a[i+1] = a1;	
+
+					float Rki0 = R[k][i]; 
+					float Rji0 = R[j][i]; 
+
+					float Rki1 = R[k][i+1]; 
+					float Rji1 = R[j][i+1]; 
+
+					R[k][i]       = (c * Rki0) + (s * Rji0);
+					R[j][i]       = (c * Rji0) - (s * Rki0);
+					R[k][i+1]     = (c * Rki1) + (s * Rji1);
+					R[j][i+1]     = (c * Rji1) - (s * Rki1);
 				}
 				if(i < N_COL){
-					float a0 = R[k][i];
-					a[i] = a0;
+					float Rki0 = R[k][i]; 
+					float Rji0 = R[j][i]; 
+					
+					R[k][i]       = (c * Rki0) + (s * Rji0);
+					R[j][i]       = (c * Rji0) - (s * Rki0);
+
 				}
+
 				#endif
 				
-				#if NUM_CORES > 1
-				if(start_column + blockSize_column >= k){
-					if(start_column < k){
-						for(i = k; (i+1<N_COL)&&(i+1<start_column+blockSize_column); i+=2){
-							float b0 = R[j][i];
-							float b1 = R[j][i+1];
-							b[i] = b0;
-							b[i+1] = b1;
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float b0 = R[j][i];
-							b[i] = b0;
-						}								
-					} else {
-						for(i = start_column; (i+1<N_COL)&&(i+1<start_column+blockSize_column); i+=2){
-							float b0 = R[j][i];
-							float b1 = R[j][i+1];
-							b[i] = b0;
-							b[i+1] = b1;
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float b0 = R[j][i];
-							b[i] = b0;
-						}
-					}
-				}
-				// pi_cl_team_barrier();
-
-				#else
-				for(i=k; i+1<N_COL; i+=2){
-					float b0 = R[j][i];
-					float b1 = R[j][i+1];					
-					b[i] = b0;
-					b[i+1] = b1;
-				}
-				if(i < N_COL){
-					float b0 = R[j][i];
-					b[i] = b0;
-				}
-
-				#endif
-				pi_cl_team_barrier();
-
-				#if NUM_CORES > 1
-				if(start_column + blockSize_column >= k){
-					if(start_column < k){
-						for(i = k; (i+1<N_COL)&&(i+1<start_column + blockSize_column); i+=2){
-							float a0 = a[i];float b0 = b[i];
-							float a1 = a[i+1];float b1 = b[i+1];
-							R[k][i]     = (c * a0) + (s * b0);
-							R[k][i+1]     = (c * a1) + (s * b1);
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float a0 = a[i];float b0 = b[i];
-							R[k][i]     = (c * a0) + (s * b0);
-						}									
-					} else {
-						for(i = start_column; (i+1<N_COL)&&(i+1<start_column + blockSize_column); i+=2){
-							float a0 = a[i];float b0 = b[i];
-							float a1 = a[i+1];float b1 = b[i+1];
-							R[k][i]     = (c * a0) + (s * b0);
-							R[k][i+1]     = (c * a1) + (s * b1);
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float a0 = a[i];float b0 = b[i];
-							R[k][i]     = (c * a0) + (s * b0);
-						}
-					}
-				}
-				#else
-				for(i=k; i+1<N_COL; i+=2){
-					float a0 = a[i];float b0 = b[i];
-					float a1 = a[i+1];float b1 = b[i+1];
-					R[k][i]     = (c * a0) + (s * b0);
-					R[k][i+1]     = (c * a1) + (s * b1);
-				}
-				if(i < N_COL){
-					float a0 = a[i];float b0 = b[i];
-					R[k][i]     = (c * a0) + (s * b0);
-				}
-				#endif
 				
 				#if NUM_CORES > 1
-				if(start_column + blockSize_column >= k){
-					if(start_column < k){
-						for(i = k; (i+1<N_COL)&&(i+1<start_column+blockSize_column); i+=2){
-							float a0 = a[i];float b0 = b[i];
-							float a1 = a[i+1];float b1 = b[i+1];
-							R[j][i]     = (c * b0) - (s * a0);
-							R[j][i+1]     = (c * b1) - (s * a1);
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float a0 = a[i];float b0 = b[i];
-							R[j][i]     = (c * b0) - (s * a0);
-						}										
-					} else {
-						for(i = start_column; (i+1<N_COL)&&(i+1<start_column+blockSize_column); i+=2){
-							float a0 = a[i];float b0 = b[i];
-							float a1 = a[i+1];float b1 = b[i+1];
-							R[j][i] = (c * b0) - (s * a0);
-							R[j][i+1] = (c * b1) - (s * a1);
-						}
-						if((i < N_COL)&&(i < start_column + blockSize_column)){
-							float a0 = a[i];float b0 = b[i];
-							R[j][i] = (c * b0) - (s * a0);
-						}
-					}
-				}
-				#else
-				for(i=k; i+1<N_COL; i+=2){
-					float a0 = a[i];float b0 = b[i];
-					float a1 = a[i+1];float b1 = b[i+1];
-					R[j][i]     = (c * b0) - (s * a0);
-					R[j][i+1]     = (c * b1) - (s * a1);
-				}
-				if(i < N_COL){
-					float a0 = a[i];float b0 = b[i];
-					R[j][i]     = (c * b0) - (s * a0);
-				}
-				#endif
 
-				#if NUM_CORES > 1
-				if(start_row<N_ROW){
-					for(i = start_row; (i+1<N_ROW)&&(i+1<start_row + blockSize_row); i+=2){
-						float a0 = Q[k][i];
-						float a1 = Q[k][i+1];						
-						a[i] = a0;
-						a[i+1] = a1;
-					}
-					if((i < N_ROW)&&(i < start_row + blockSize_row)){
-						float a0 = Q[k][i];
-						a[i] = a0;
-					}
-				}
-				#else
-				for(i=0; i+1<N_ROW; i+=2){
-					float a0 = Q[k][i];
-					float a1 = Q[k][i+1];					
-					a[i] = a0;
-					a[i+1] = a1;
-					}
-				if(i < N_ROW){
-					float a0 = Q[k][i];
-					a[i] = a0;
-				}
-				#endif
-
-				#if NUM_CORES > 1
-				if(start_row<N_ROW){
-					for(i = start_row; (i+1<N_ROW)&&(i+1<start_row + blockSize_row); i+=2){
-						float b0 = Q[j][i];
-						float b1 = Q[j][i+1];						
-						b[i] = b0;
-						b[i+1] = b1;
-					}
-					if((i < N_ROW)&&(i < start_row + blockSize_row)){
-						float b0 = Q[j][i];
-						b[i] = b0;
-					}
-				}
-				pi_cl_team_barrier();
-
-				#else	
-				for(i=0; i+1<N_ROW; i+=2){
-					float b0 = Q[j][i];
-					float b1 = Q[j][i+1];
-					b[i] = b0;
-					b[i+1] = b1;
-				}
-				if(i < N_ROW){
-					float b0 = Q[j][i];
-					b[i] = b0;
-				}
-				#endif
+				// for(i = start_row; (i+1<end_row); i+=2){
+				// 	float a0 = aQ[i];float b0 = bQ[i];
+				// 	float a1 = aQ[i+1];float b1 = bQ[i+1];
+				// 	Q[k][i] = (c * a0)+(s * b0);
+				// 	Q[k][i+1] = (c * a1)+(s * b1);
+				// 	Q[j][i] = (c * b0)-(s * a0);
+				// 	Q[j][i+1] = (c * b1)-(s * a1);
+				// }
+				// if((i < end_row)){
+				// 	float a0 = aQ[i];float b0 = bQ[i];
+				// 	Q[k][i] = (c * a0)+(s * b0);
+				// 	Q[j][i] = (c * b0)-(s * a0);
+				// }
 
 
-				#if NUM_CORES > 1
-				if(start_row<N_ROW){
-					for(i = start_row; (i+1<N_ROW)&&(i+1<start_row + blockSize_row); i+=2){
-						float a0 = a[i];float b0 = b[i];
-						float a1 = a[i+1];float b1 = b[i+1];
-						Q[k][i] = (c * a0)+(s * b0);
-						Q[k][i+1] = (c * a1)+(s * b1);
-					}
-					if((i < N_ROW)&&(i < start_row + blockSize_row)){
-						float a0 = a[i];float b0 = b[i];
-						Q[k][i] = (c * a0)+(s * b0);
-					}
-				}
-				#else
-				for(i=0; i+1<N_ROW; i+=2){
-					float a0 = a[i];float b0 = b[i];
-					float a1 = a[i+1];float b1 = b[i+1];						
+				for(i = start_row; (i<end_row); i++){
+					float a0 = aQ[i];float b0 = bQ[i];
 					Q[k][i] = (c * a0)+(s * b0);
-					Q[k][i+1] = (c * a1)+(s * b1);
-
-				}
-				if(i < N_ROW){
-					float a0 = a[i];float b0 = b[i];
-					Q[k][i] = (c * a0)+(s * b0);
-				}
-				#endif
-
-				#if NUM_CORES > 1
-				if(start_row<N_ROW){
-					for(i = start_row; (i+1<N_ROW)&&(i+1<start_row + blockSize_row); i+=2){
-						float a0 = a[i];float b0 = b[i];
-						float a1 = a[i+1];float b1 = b[i+1];						
-						Q[j][i] = (c * b0)-(s * a0);
-						Q[j][i+1] = (c * b1)-(s * a1);
-
-					}
-					if((i < N_ROW)&&(i < start_row + blockSize_row)){
-						float a0 = a[i];float b0 = b[i];
-						Q[j][i] = (c * b0)-(s * a0);
-					}
-				}
-				#else
-				for(i=0; i+1<N_ROW; i+=2){
-					float a0 = a[i];float b0 = b[i];
-					float a1 = a[i+1];float b1 = b[i+1];
-					Q[j][i] = (c * b0)-(s * a0);
-					Q[j][i+1] = (c * b1)-(s * a1);
-					}
-				if(i < N_ROW){
-					float a0 = a[i];float b0 = b[i];
 					Q[j][i] = (c * b0)-(s * a0);
 				}
+				
+				#else
+
+				for(i=0; (i+1)<N_ROW; i+=2){
+
+					float Qki0 = Q[k][i]  ;float Qji0 = Q[j][i];
+					float Qki1 = Q[k][i+1];float Qji1 = Q[j][i+1];
+					
+					Q[k][i]   = (c * Qki0)+(s * Qji0);
+					Q[j][i] = (c * Qji0)-(s * Qki0);
+
+					Q[k][i+1] = (c * Qki1)+(s * Qji1);
+					Q[j][i+1] = (c * Qji1)-(s * Qki1);
+				}if(i < N_ROW){
+					float Qki0 = Q[k][i]  ;float Qji0 = Q[j][i];
+
+					Q[k][i]   = (c * Qki0)+(s * Qji0);
+					Q[j][i] = (c * Qji0)-(s * Qki0);					
+				}
+
 				#endif
 			}
 		}
     }
     return;
 }
+
