@@ -200,7 +200,7 @@ __attribute__((noinline)) void norm(float *v, int row, int column, int k, int bl
 	}
 
 	R[k][k] = Sqrt(n);
-	rk = 1 / R[k][k];
+	rk = one / R[k][k];
 	#if NUM_CORES > 2
 	pi_cl_team_barrier();
 	BarrierCounter

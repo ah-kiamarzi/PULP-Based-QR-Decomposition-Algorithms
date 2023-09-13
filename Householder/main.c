@@ -20,13 +20,6 @@ PI_L1 float v[N_ROW];
 PI_L1 float b[N_COL];
 PI_L1 float v_temp[N_ROW][N_ROW];
 
-
-
-PI_L1 float zero = 0;
-PI_L1 float one = 1;
-PI_L1 float two = 2;
-
-
 float res[N_ROW][N_COL];
 
 int numBarr = 0;
@@ -216,7 +209,7 @@ void house_opt(float *v,float *b, float *x, int n){
 	float v0 = v[0]; 
 	float v0p2 = v0*v0;
 	*b = two*v0p2/(sigma+v0p2);
-	v[0] = 1;
+	v[0] = one;
 	for (int i = 1; i < n; i++){
 		v[i] = v[i]/v0;
 	}
@@ -376,7 +369,7 @@ void qr_household(float Q[][N_ROW], float R[][N_ROW]){
 
 
 	for (int j = N_COL-1; j >= 0; j--){
-		v[j] = 1;
+		v[j] = one;
 		#if NUM_CORES > 1
 			if(start_ROW >= j+1){
 				start = start_ROW;

@@ -111,13 +111,13 @@ void cluster_main(){
 
 
 
-	// for(ii = 0; ii < 1; ii++){
+	// for(ii = 0; ii < 3; ii++){
 	// 	if (pi_core_id()==0){
 	// 		initialMatrixEYE(&Q[0][0],N_ROW,N_ROW);
 	// 		initialMatrixMatrix(&R[0][0],N_ROW,N_COL,&input[0][0]);
 	// 	}		
 	// 	pi_cl_team_barrier();
-	// 	if(ii == 0){
+	// 	if(ii == 2){
 	// 		pi_cl_team_barrier();
 				
 	// 		pi_perf_reset();
@@ -180,12 +180,12 @@ void inline givens_rotation(float x, float y, float *c, float *s){
     
     if ((fabs(x)) >= (fabs(y))){ 
         r = x / y;
-        *s = one/sqrtf(one + r*r);
+        *s = one/Sqrt(one + r*r);
         *c = (*s)*r;
 	}
     else{
         r = y / x;
-        *c = one /sqrtf(one + r*r);
+        *c = one /Sqrt(one + r*r);
         *s = (*c)*r;
 	}
     return;
@@ -351,4 +351,3 @@ void factorization(float Q[][N_ROW], float R[][N_COL]){
     }
     return;
 }
-
